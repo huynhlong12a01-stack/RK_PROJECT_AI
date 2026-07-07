@@ -1,0 +1,18 @@
+"canonical_column","display_name","unit","aliases","default_transform","has_class_bins"
+"pH","pH Da:%t","pH unit","pH; PH; soil_pH","none",TRUE
+"Humus","MC9n / Cha:%t ha;/u cF!","%","Humus; OM; OrganicMatter; SOC","auto",TRUE
+"CEC","Dung tC-ch trao Da;i cation","cmol(+)/kg","CEC; CationExchangeCapacity","auto",TRUE
+"N_total","Da:!m ta;ng sa;","%","N; N_total; TotalN; TN","auto",TRUE
+"P_Olsen","LC"n da; tiC*u Olsen","mg/kg","P; P_Olsen; AvailableP; OlsenP","log1p",TRUE
+"P_Bray","LC"n da; tiC*u Bray","mg/kg","P_Bray; AvailableP_Bray; BrayP","log1p",TRUE
+"K_available_mgkg","Kali da; tiC*u","mg/kg","K; K2O; AvailableK; K_available","auto",TRUE
+"K_exchangeable_cmol","Kali trao Da;i","cmol(+)/kg","K_ex; ExchangeableK; K_cmol","auto",TRUE
+"Ca_exchangeable","Canxi trao Da;i","cmol(+)/kg","Ca; Ca_ex; ExchangeableCa","auto",TRUE
+"Mg_exchangeable","Magie trao Da;i","cmol(+)/kg","Mg; Mg_ex; ExchangeableMg","auto",TRUE
+"S_available","LF0u hua;3nh da; tiC*u","mg/kg","S; SO4; AvailableS","auto",TRUE
+"B_available","Bo da; tiC*u","mg/kg","B; Boron","log1p",TRUE
+"Zn_available","Ka:=m da; tiC*u","mg/kg","Zn; Zinc","log1p",TRUE
+"Cu_available","Da;ng da; tiC*u","mg/kg","Cu; Copper","log1p",TRUE
+"Mn_available","Mangan da; tiC*u","mg/kg","Mn; Manganese","log1p",TRUE
+"Fe_available","Sa:/t da; tiC*u","mg/kg","Fe; Iron","log1p",TRUE
+"EC","Da; da:+n Dia;n EC","dS/m","EC; ECe; Salinity","log1p",TRUE

@@ -1,0 +1,33 @@
+# Runtime output and temporary files
+output/
+.tmp/
+*.log
+*.tmp
+
+# R session artifacts
+.Rhistory
+.RData
+.Rproj.user/
+
+# Raw/private geospatial inputs and generated rasters
+input/raster/
+input/points/soil_points.csv
+*.tif
+*.tiff
+
+# Keep reusable input templates, ignore timestamped retries
+input/points/soil_points_template_*.xlsx
+
+# Agent runtime products
+agent/history/
+agent/responses/
+agent/decisions/validated*.json
+agent/requests/run_request_*.json
+!agent/requests/run_request_template.json
+
+# Local smoke/debug requests
+agent/requests/*smoke*.json
+
+# Generated backups and archives
+scripts/main_before_*.R
+*.zip
