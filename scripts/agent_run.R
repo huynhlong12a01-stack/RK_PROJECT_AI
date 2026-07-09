@@ -136,6 +136,9 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
   rk_report <- agent_read_csv_if_exists(rk_report_csv)
   vg <- evaluation$variogram %||% list()
   cv <- evaluation$cross_validation$metrics %||% list()
+  cv_info <- evaluation$cross_validation %||% list()
+  cls <- evaluation$class_evaluation %||% list()
+  unc <- evaluation$uncertainty %||% list()
   q <- evaluation$quality %||% list()
   range_max <- request$parameters$VARIOGRAM_RANGE_MAX %||% NA_real_
   range_hit_max <- FALSE
@@ -161,6 +164,25 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
       regression_rmse = agent_pick_model_metric(model_comparison, "Regression-only", "RMSE"),
       ordinary_kriging_rmse = agent_pick_model_metric(model_comparison, "Ordinary Kriging", "RMSE"),
       regression_kriging_rmse = agent_pick_model_metric(model_comparison, "Regression Kriging", "RMSE")
+    ),
+    cross_validation = list(
+      method = cv_info$method %||% NULL,
+      cv_folds = cv_info$cv_folds %||% NULL,
+      refit_variogram = cv_info$refit_variogram %||% NULL,
+      leakage_guard = cv_info$leakage_guard %||% NULL
+    ),
+    class_evaluation = list(
+      enabled = cls$enabled %||% FALSE,
+      class_accuracy = cls$class_accuracy %||% NULL,
+      within_one_class_rate = cls$within_one_class_rate %||% NULL,
+      severe_misclassification_rate = cls$severe_misclassification_rate %||% NULL
+    ),
+    uncertainty = list(
+      available = unc$available %||% FALSE,
+      mean_sd = unc$mean_sd %||% NULL,
+      max_sd = unc$max_sd %||% NULL,
+      high_uncertainty_area_percent = unc$high_uncertainty_area_percent %||% NULL,
+      note = "Residual kriging STD only; regression and covariate uncertainty are not included."
     ),
     kriging = list(
       auto_neighbors_enabled = if (nrow(rk_report) > 0 && "auto_neighbors_enabled" %in% names(rk_report)) rk_report$auto_neighbors_enabled[1] else NULL,

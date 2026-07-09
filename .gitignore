@@ -31,3 +31,14 @@ agent/requests/*smoke*.json
 # Generated backups and archives
 scripts/main_before_*.R
 *.zip
+# RAG local/copyrighted source files and generated indexes
+knowledge/library/
+knowledge/index/vector_store/
+knowledge/index/*.sqlite
+knowledge/index/*.rds
+knowledge/index/*.bin
+knowledge/index/*.faiss
+knowledge/index/local_chunks/
+knowledge/index/local_chunks_manifest.json
+knowledge/metadata/local_library_inventory*.csv
+knowledge/metadata/local_source_metadata_draft*.csv

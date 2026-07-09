@@ -1,0 +1,11 @@
+{
+  "claim_id": "spatial_cv_random_bias_001",
+  "claim": "Random cross-validation can be over-optimistic for spatially structured data; spatial or block cross-validation is often more appropriate for map prediction assessment.",
+  "applies_to": ["spatial_cross_validation", "block_cross_validation", "model_assessment"],
+  "evidence_sources": ["roberts_2017_spatial_cv", "valavi_2019_blockcv", "ploton_2020_spatial_validation"],
+  "strength": "strong",
+  "conditions": "Applies when nearby observations are spatially autocorrelated and prediction is intended for unsampled locations.",
+  "limitations": "The best blocking strategy depends on sampling density, spatial process scale, and prediction objective.",
+  "recommended_action": "Prefer spatial_kmeans or block-style validation for judging map reliability, and report random CV separately if used.",
+  "not_allowed_action": "Do not accept a map solely because random CV looks good."
+}

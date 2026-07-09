@@ -1,0 +1,11 @@
+{
+  "claim_id": "soil_nutrient_class_accuracy_001",
+  "claim": "For nutrient maps used to support management classes, continuous prediction metrics should be complemented by class accuracy or misclassification severity.",
+  "applies_to": ["soil_nutrients", "soil_property_classification", "class_accuracy"],
+  "evidence_sources": ["fao_2006_plant_nutrition_food_security", "mcbratney_2003_dsm", "bellon_maurel_2010_rpd_rpiq"],
+  "strength": "moderate",
+  "conditions": "Applies when soil indicators are interpreted using agronomic classes, such as low/medium/high nutrient status.",
+  "limitations": "Class thresholds vary by crop, region, extraction method and local agronomic guideline.",
+  "recommended_action": "Report class accuracy when class bins exist, and warn against detailed fertilizer decisions when class accuracy is low.",
+  "not_allowed_action": "Do not use a low-accuracy class map for precise fertilizer prescription without expert review."
+}

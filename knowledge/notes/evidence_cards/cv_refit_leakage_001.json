@@ -1,0 +1,11 @@
+{
+  "claim_id": "cv_refit_leakage_001",
+  "claim": "Model fitting steps, including trend fitting and variogram fitting, should be performed inside each validation fold when estimating predictive performance to avoid information leakage.",
+  "applies_to": ["cross_validation", "leakage", "variogram"],
+  "evidence_sources": ["roberts_2017_spatial_cv", "hengl_2007_about_rk", "webster_oliver_2007_geostatistics"],
+  "strength": "moderate",
+  "conditions": "Applies when cross-validation is intended to estimate performance on unseen locations.",
+  "limitations": "Full refitting is slower and can be unstable with small sample sizes; if skipped, the report must disclose possible optimism/leakage.",
+  "recommended_action": "Keep CV_REFIT_VARIOGRAM enabled for scientific runs when computationally feasible.",
+  "not_allowed_action": "Do not fit variogram using test points and present the result as strict out-of-sample validation."
+}

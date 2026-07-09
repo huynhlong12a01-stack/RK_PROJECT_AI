@@ -46,7 +46,8 @@ check_file <- function(path) if (!file.exists(path)) stop(paste0("File not found
 check_file(POINT_FILE)
 if (!file.exists(request_template)) stop(paste0("Request template not found: ", request_template))
 
-pts <- read.csv(POINT_FILE, stringsAsFactors = FALSE, check.names = FALSE)
+agent_require_package("readr")
+pts <- as.data.frame(readr::read_csv(POINT_FILE, show_col_types = FALSE, progress = FALSE))
 bom <- rawToChar(as.raw(c(0xef, 0xbb, 0xbf)))
 names(pts) <- trimws(sub(paste0("^", bom), "", names(pts), useBytes = TRUE))
 analysis_cols <- setdiff(names(pts), c(CODE_COL, LAT_COL, LON_COL))
@@ -78,13 +79,13 @@ rows <- list()
 
 for (target in requested_targets) {
   target_name <- agent_safe_name(target)
-  run_id <- paste0(target_name, "_iter_001")
+  run_id <- paste0(target_name, "_", batch_id, "_iter_001")
   req <- template
   req$run_id <- run_id
   req$target_field <- target
   req$output_root <- req$output_root %||% "output/agent_runs"
   req$safety_limits <- agent_merge_lists(req$safety_limits %||% list(), list(max_iterations = 3, allow_delete_points = FALSE, allow_modify_raw_data = FALSE))
-  req_file <- file.path("agent", "requests", paste0("run_request_", target_name, "_iter_001.json"))
+  req_file <- file.path("agent", "requests", paste0("run_request_", target_name, "_", batch_id, "_iter_001.json"))
   agent_write_json(req, req_file)
 
   cat("[INFO] Running target: ", target, "\n", sep = "")
@@ -142,7 +143,7 @@ for (target in requested_targets) {
 
 summary_table <- do.call(rbind, rows)
 summary_csv <- sub("\\.json$", ".csv", output_summary)
-write.csv(summary_table, summary_csv, row.names = FALSE, fileEncoding = "UTF-8")
+agent_write_csv(summary_table, summary_csv)
 
 summary <- list(
   batch_id = batch_id,

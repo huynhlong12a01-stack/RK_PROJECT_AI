@@ -1,0 +1,11 @@
+{
+  "claim_id": "rk_baseline_comparison_001",
+  "claim": "Regression Kriging results should be compared against regression-only and ordinary kriging baselines; lower RMSE alone is not sufficient if diagnostics worsen.",
+  "applies_to": ["model_comparison", "regression_kriging", "cross_validation"],
+  "evidence_sources": ["hengl_2007_about_rk", "hengl_2004_generic_rk_soil", "willmott_matsuura_2005_mae_rmse"],
+  "strength": "strong",
+  "conditions": "Applies to predictive mapping workflows where alternative baseline models can be evaluated with the same validation scheme.",
+  "limitations": "Baseline superiority can depend on sampling design, validation strategy, and the target soil property.",
+  "recommended_action": "Report RMSE, MAE, ME, R2_pred and diagnostic warnings for RK, regression-only, and OK.",
+  "not_allowed_action": "Do not select the final map only because one run has the lowest RMSE."
+}

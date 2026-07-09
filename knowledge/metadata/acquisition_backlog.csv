@@ -1,0 +1,38 @@
+backlog_id,priority,topic,suggested_title_or_query,why_needed,source_type,status
+geo_001,high,geostatistics,Geostatistics for Natural Resources Evaluation,Core variogram and kriging theory,book,metadata_added
+geo_002,high,geostatistics,Geostatistics for Environmental Scientists,Environmental variogram and kriging practice,book,metadata_added
+geo_003,high,geostatistics,Statistics for Spatial Data,Spatial statistics theory,book,metadata_added
+rk_001,high,regression_kriging,About regression-kriging: From equations to case studies,Core RK workflow,paper,metadata_added
+rk_002,high,regression_kriging,A generic framework for spatial prediction of soil variables based on regression-kriging,Core soil RK workflow,paper,metadata_added
+rk_003,high,regression_kriging,Further results on prediction of soil properties from terrain attributes regression-kriging,Early terrain-based soil RK,paper,metadata_added
+dsm_001,high,digital_soil_mapping,On digital soil mapping,Foundational DSM/SCORPAN,paper,metadata_added
+dsm_002,high,digital_soil_mapping,Digital soil mapping: A brief history and some lessons,DSM overview,paper,metadata_added
+dsm_003,high,digital_soil_mapping,Machine learning for digital soil mapping applications challenges suggested solutions,DSM ML review,paper,metadata_added
+dsm_004,medium,digital_soil_mapping,Digital Soil Mapping with R,Practical DSM implementation,book,needs_metadata
+dsm_005,medium,digital_soil_mapping,Digital Soil Mapping: Bridging Research Environmental Application and Operation,DSM applications,book,needs_metadata
+cv_001,high,spatial_cv,Cross-validation strategies for data with temporal spatial hierarchical or phylogenetic structure,Spatial CV rationale,paper,metadata_added
+cv_002,high,spatial_cv,blockCV R package spatially or environmentally separated folds,Block CV implementation,paper,metadata_added
+cv_003,medium,spatial_cv,CAST package area of applicability spatial model validation,Prediction domain/model transferability,paper,needs_metadata
+cv_004,medium,spatial_cv,spatialsample spatial resampling tidymodels,Modern spatial CV tooling,paper_or_docs,needs_metadata
+vario_001,high,variogram,Directional variograms anisotropy soil mapping,Anisotropy diagnostics,paper,needs_metadata
+vario_002,high,variogram,Variogram model selection soil properties nugget sill range,Variogram fitting rules,paper,needs_metadata
+vario_003,medium,variogram,Robust variogram estimation outliers Cressie Hawkins,Outlier robust variogram,paper,needs_metadata
+unc_001,high,uncertainty,SoilGrids 2.0 quantified spatial uncertainty,Uncertainty in DSM,paper,metadata_added
+unc_002,medium,uncertainty,Uncertainty propagation in regression kriging soil mapping,Full RK uncertainty,paper,needs_metadata
+metric_001,high,evaluation_metrics,Advantages of MAE over RMSE,Metric interpretation,paper,metadata_added
+metric_002,medium,evaluation_metrics,RPD RPIQ soil attribute prediction quality,Soil prediction metrics,paper,metadata_added
+metric_003,medium,evaluation_metrics,Nash Sutcliffe efficiency model evaluation,Optional metric,paper,metadata_added
+nutrient_001,high,soil_nutrients,FAO Plant nutrition for food security,Soil nutrient interpretation,guideline,metadata_added
+nutrient_002,high,soil_nutrients,Kellogg Soil Survey Laboratory Methods Manual,Soil lab methods,guideline,metadata_added
+nutrient_003,medium,soil_nutrients,soil test interpretation phosphorus potassium micronutrients,Class thresholds for nutrients,guideline,needs_user_region
+nutrient_004,medium,soil_nutrients,soil pH interpretation and nutrient availability,Class thresholds for pH,guideline,needs_user_region
+cov_001,high,covariates,SCORPAN environmental covariates digital soil mapping,Covariate rationale,paper,metadata_added
+cov_002,medium,covariates,remote sensing covariates NDVI soil property mapping,Remote sensing covariate evidence,paper,needs_metadata
+cov_003,medium,covariates,terrain attributes DEM slope curvature soil property prediction,Terrain covariate evidence,paper,needs_metadata
+ml_001,medium,machine_learning_baseline,Random forest digital soil mapping soil properties,RF baseline evidence,paper,needs_metadata
+ml_002,medium,machine_learning_baseline,GAM digital soil mapping soil properties,GAM baseline evidence,paper,needs_metadata
+ml_003,medium,machine_learning_baseline,XGBoost digital soil mapping soil properties,XGBoost baseline evidence,paper,needs_metadata
+sampling_001,high,sampling,Sampling for digital soil mapping tutorial R scripts,Sampling design,paper,metadata_added_needs_doi_check
+sampling_002,medium,sampling,conditioned Latin hypercube sampling digital soil mapping,Sampling design,paper,needs_metadata
+class_001,medium,class_accuracy,soil nutrient class accuracy confusion matrix digital soil mapping,Class-map validation,paper,needs_metadata
+class_002,medium,class_accuracy,severe misclassification soil fertility maps,Management risk,paper,needs_metadata

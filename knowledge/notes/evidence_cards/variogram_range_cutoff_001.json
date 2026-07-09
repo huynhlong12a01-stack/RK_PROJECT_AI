@@ -1,0 +1,11 @@
+{
+  "claim_id": "variogram_range_cutoff_001",
+  "claim": "A practical range close to the variogram cutoff or forced maximum can indicate weakly constrained spatial structure and possible over-smoothing risk.",
+  "applies_to": ["variogram", "range", "cutoff", "manual_review"],
+  "evidence_sources": ["webster_oliver_2007_geostatistics", "goovaerts_1997_geostatistics", "hengl_2009_geostatistical_mapping"],
+  "strength": "moderate",
+  "conditions": "Most relevant when the experimental variogram does not clearly approach a sill within the sampled distance range.",
+  "limitations": "No universal threshold applies; interpretation depends on extent, sampling design, soil process scale, and lag support.",
+  "recommended_action": "Open the interactive variogram, compare constrained models, and avoid automatic acceptance when range_hit_max is true or practical range is near cutoff.",
+  "not_allowed_action": "Do not force a long range simply to smooth the final map or reduce apparent local noise."
+}

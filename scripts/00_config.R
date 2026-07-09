@@ -25,6 +25,8 @@ OUTPUT_ROOT <- "output"
 ASK_OUTPUT_FOLDER <- TRUE
 OUTPUT_NAME_PREFIX <- ""
 
+# Set a numeric EPSG when the study area is fixed, or use "auto" to infer
+# the UTM zone from the sample point centroid.
 UTM_EPSG <- 32649
 
 # "auto" = use first PC raster resolution after projection to UTM.

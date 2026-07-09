@@ -88,6 +88,37 @@ detect_pc_files <- function() {
   return(files)
 }
 
+utm_epsg_from_lonlat <- function(lon, lat) {
+  lon <- suppressWarnings(as.numeric(lon))
+  lat <- suppressWarnings(as.numeric(lat))
+  if (!is.finite(lon) || !is.finite(lat)) return(NA_integer_)
+  zone <- floor((lon + 180) / 6) + 1
+  zone <- max(1, min(60, zone))
+  if (lat >= 0) 32600L + zone else 32700L + zone
+}
+
+resolve_utm_epsg <- function(points_df, lon_col, lat_col, configured_epsg) {
+  lon <- suppressWarnings(as.numeric(points_df[[lon_col]]))
+  lat <- suppressWarnings(as.numeric(points_df[[lat_col]]))
+  lon <- lon[is.finite(lon)]
+  lat <- lat[is.finite(lat)]
+  center_lon <- if (length(lon) > 0) stats::median(lon, na.rm = TRUE) else NA_real_
+  center_lat <- if (length(lat) > 0) stats::median(lat, na.rm = TRUE) else NA_real_
+  auto_epsg <- utm_epsg_from_lonlat(center_lon, center_lat)
+
+  if (is.character(configured_epsg) && tolower(trimws(configured_epsg[1])) == "auto") {
+    if (!is.finite(auto_epsg)) stop("Cannot auto-detect UTM_EPSG because lon/lat coordinates are not valid.")
+    return(list(epsg = as.integer(auto_epsg), auto_epsg = as.integer(auto_epsg), mode = "auto", warning = NULL, center_lon = center_lon, center_lat = center_lat))
+  }
+
+  epsg <- suppressWarnings(as.integer(configured_epsg[1]))
+  if (!is.finite(epsg)) stop("UTM_EPSG must be a numeric EPSG code or 'auto'.")
+  warning <- NULL
+  if (is.finite(auto_epsg) && !identical(as.integer(epsg), as.integer(auto_epsg))) {
+    warning <- paste0("UTM_EPSG config = ", epsg, " nhưng tâm điểm mẫu gợi ý EPSG:", auto_epsg, ". Hãy kiểm tra lại zone UTM trước khi dùng kết quả chính thức.")
+  }
+  list(epsg = as.integer(epsg), auto_epsg = as.integer(auto_epsg), mode = "configured", warning = warning, center_lon = center_lon, center_lat = center_lat)
+}
 ask_output_name <- function(target_name = "run") {
   if (exists("RUN_NAME_OVERRIDE") && !is.null(RUN_NAME_OVERRIDE) && nzchar(as.character(RUN_NAME_OVERRIDE))) {
     return(safe_name(as.character(RUN_NAME_OVERRIDE)))
@@ -167,6 +198,57 @@ get_vgm_params <- function(vgm_obj) {
   ))
 }
 
+variogram_practical_range <- function(model, range) {
+  model <- as.character(model %||% "")
+  range <- suppressWarnings(as.numeric(range))
+  if (!is.finite(range)) return(NA_real_)
+  if (identical(model, "Exp")) return(3 * range)
+  if (identical(model, "Gau")) return(sqrt(3) * range)
+  range
+}
+
+variogram_candidate_score <- function(sse, params, experimental_vgm) {
+  nugget <- suppressWarnings(as.numeric(params$nugget %||% NA_real_))
+  psill <- suppressWarnings(as.numeric(params$psill %||% NA_real_))
+  total_sill <- nugget + psill
+  nugget_sill <- if (is.finite(total_sill) && total_sill > 0) nugget / total_sill else NA_real_
+  practical <- variogram_practical_range(params$model, params$range)
+  penalty <- 0
+  penalty_reasons <- character(0)
+
+  if (is.finite(nugget_sill) && nugget_sill > MAX_NUGGET_SILL_RATIO_WARNING) {
+    penalty <- penalty + 0.80
+    penalty_reasons <- c(penalty_reasons, "high_nugget_sill")
+  } else if (is.finite(nugget_sill) && nugget_sill > 0.50) {
+    penalty <- penalty + 0.25
+    penalty_reasons <- c(penalty_reasons, "moderate_nugget_sill")
+  }
+
+  if (is.finite(params$range) && params$range >= 0.98 * VARIOGRAM_RANGE_MAX) {
+    penalty <- penalty + 1.00
+    penalty_reasons <- c(penalty_reasons, "range_hits_max")
+  }
+  if (is.finite(practical) && is.finite(VARIOGRAM_CUTOFF) && practical > MAX_PRACTICAL_RANGE_FACTOR_OF_CUTOFF * VARIOGRAM_CUTOFF) {
+    penalty <- penalty + 0.60
+    penalty_reasons <- c(penalty_reasons, "practical_range_near_cutoff")
+  }
+  if ("np" %in% names(experimental_vgm)) {
+    low_bins <- sum(experimental_vgm$np < MIN_PAIRS_PER_VARIOGRAM_BIN, na.rm = TRUE)
+    if (low_bins > 0) {
+      penalty <- penalty + min(0.50, 0.08 * low_bins)
+      penalty_reasons <- c(penalty_reasons, "low_lag_pairs")
+    }
+  }
+
+  list(
+    candidate_score = log1p(sse) + penalty,
+    diagnostic_penalty = penalty,
+    diagnostic_flags = paste(unique(penalty_reasons), collapse = ";"),
+    nugget_sill_ratio = nugget_sill,
+    practical_range = practical,
+    range_hit_max = is.finite(params$range) && params$range >= 0.98 * VARIOGRAM_RANGE_MAX
+  )
+}
 fit_variogram_auto_select <- function(experimental_vgm, residual_values) {
   residual_var <- var(residual_values, na.rm = TRUE)
 
@@ -235,6 +317,8 @@ fit_variogram_auto_select <- function(experimental_vgm, residual_values) {
       next
     }
 
+    diag_score <- variogram_candidate_score(sse, params, experimental_vgm)
+
     result_rows[[idx]] <- data.frame(
       model = m,
       init_range = init_range,
@@ -244,7 +328,13 @@ fit_variogram_auto_select <- function(experimental_vgm, residual_values) {
       fitted_nugget = params$nugget,
       fitted_psill = params$psill,
       fitted_range = params$range,
+      practical_range = diag_score$practical_range,
+      nugget_sill_ratio = diag_score$nugget_sill_ratio,
+      range_hit_max = diag_score$range_hit_max,
       sse = sse,
+      diagnostic_penalty = diag_score$diagnostic_penalty,
+      diagnostic_flags = diag_score$diagnostic_flags,
+      candidate_score = diag_score$candidate_score,
       stringsAsFactors = FALSE
     )
 
@@ -260,11 +350,11 @@ fit_variogram_auto_select <- function(experimental_vgm, residual_values) {
   }
 
   results <- do.call(rbind, result_rows)
-  best_i <- which.min(results$sse)
+  best_i <- which.min(results$candidate_score)
 
   return(list(
     fitted = fit_objects[[best_i]],
-    table = results[order(results$sse), ]
+    table = results[order(results$candidate_score, results$sse), ]
   ))
 }
 
@@ -687,8 +777,18 @@ auto_select_neighbors <- function(model_df, points_sf, regression_formula, targe
     r2 <- if ("R2" %in% names(rk_row)) rk_row$R2[1] else NA_real_
     n_missing <- rk_row$n_missing[1]
     missing_rate <- n_missing / max(1, rk_row$n_total[1])
-    score <- rmse + 0.25 * abs(me) + missing_rate * rmse
-    if (is.finite(r2) && r2 < 0) score <- score + 0.10 * rmse
+    score_scale <- if (is.finite(rmse) && rmse > 0) rmse else max(stats::sd(model_df[[target_field]], na.rm = TRUE), 1e-9)
+    vg_params <- tryCatch(get_vgm_params(manual_vgm), error = function(e) NULL)
+    practical_range <- if (!is.null(vg_params)) variogram_practical_range(vg_params$model, vg_params$range) else NA_real_
+    score_penalty <- 0
+    if (is.finite(r2) && r2 < 0) score_penalty <- score_penalty + score_scale * min(0.35, 0.10 + abs(r2) * 0.05)
+    if (is.finite(practical_range) && practical_range > 0) {
+      if (SEARCH_RADIUS > 1.75 * practical_range) score_penalty <- score_penalty + score_scale * 0.12
+      if (SEARCH_RADIUS < 0.45 * practical_range) score_penalty <- score_penalty + score_scale * 0.08
+    }
+    if (NMAX_NEIGHBORS > max(24, 0.30 * nrow(model_df))) score_penalty <- score_penalty + score_scale * 0.05
+    if (NMAX_NEIGHBORS > max(32, 0.45 * nrow(model_df))) score_penalty <- score_penalty + score_scale * 0.10
+    score <- rmse + 0.25 * abs(me) + missing_rate * score_scale + score_penalty
     if (!is.finite(score)) score <- Inf
 
     rows[[length(rows) + 1]] <- data.frame(
@@ -876,7 +976,9 @@ paste0('document.getElementById("rangeMax").value=', VARIOGRAM_RANGE_MAX, ';'),
 '</html>'
   )
 
-  writeLines(html, html_file)
+  con <- file(html_file, open = "wb")
+  on.exit(close(con), add = TRUE)
+  writeBin(charToRaw(paste(html, collapse = "\n")), con)
 }
 
 check_file(POINT_FILE)
@@ -944,12 +1046,18 @@ make_output_folders(OUT_DIR)
 cat("\nOutput run folder: ", OUT_DIR, "\n\n", sep = "")
 
 log_file <- out_path("06_report", "logs", paste0("run_log_", TARGET_NAME, ".txt"))
-writeLines(paste0("Regression Kriging log - ", Sys.time()), log_file)
+con <- file(log_file, open = "wb")
+log_header <- paste0("Regression Kriging log - ", Sys.time(), "\n")
+writeBin(charToRaw(log_header), con)
+close(con)
 
 log_msg <- function(...) {
   txt <- paste0(..., collapse = "")
+  Encoding(txt) <- "UTF-8"
   cat(txt, "\n")
-  cat(txt, "\n", file = log_file, append = TRUE)
+  con <- file(log_file, open = "ab")
+  on.exit(close(con), add = TRUE)
+  writeBin(charToRaw(paste0(txt, "\n")), con)
 }
 
 scientific_warnings <- character(0)
@@ -965,7 +1073,7 @@ log_msg("Target field: ", TARGET_FIELD)
 log_msg("Analysis columns: ", paste(analysis_cols, collapse = ", "))
 log_msg("Detected PC rasters: ", paste(PREDICTORS, collapse = ", "))
 log_msg("Number of PC rasters: ", length(PREDICTORS))
-log_msg("UTM EPSG: ", UTM_EPSG)
+log_msg("UTM EPSG config: ", UTM_EPSG)
 log_msg("Variogram mode: ", VARIOGRAM_MODE)
 log_msg("Manual variogram: model=", VARIOGRAM_MODEL, ", nugget=", MANUAL_NUGGET, ", psill=", MANUAL_PSILL, ", range=", MANUAL_RANGE)
 log_msg("Variogram cutoff: ", VARIOGRAM_CUTOFF)
@@ -993,8 +1101,13 @@ if (nrow(pts_raw) < 5) {
   stop("Too few valid points after NA filtering. Need at least 5 points.")
 }
 
-pts_sf <- st_as_sf(
-  pts_raw,
+utm_resolution <- resolve_utm_epsg(pts_raw, LON_COL, LAT_COL, UTM_EPSG)
+UTM_EPSG <- utm_resolution$epsg
+if (!is.null(utm_resolution$warning)) add_science_warning(utm_resolution$warning)
+log_msg("UTM centroid lon/lat: ", round(utm_resolution$center_lon, 6), ", ", round(utm_resolution$center_lat, 6))
+log_msg("UTM EPSG active: ", UTM_EPSG, " (mode=", utm_resolution$mode, ", auto_suggestion=", utm_resolution$auto_epsg, ")")
+
+pts_sf <- st_as_sf(pts_raw,
   coords = c(LON_COL, LAT_COL),
   crs = 4326,
   remove = FALSE
@@ -1860,6 +1973,9 @@ quality_context <- list(
   range_max = VARIOGRAM_RANGE_MAX,
   cv_summary = cv_summary,
   cv_predictions = quality_cv,
+  cv_method = if ("cv_method" %in% names(quality_cv) && nrow(quality_cv) > 0) quality_cv$cv_method[1] else NA_character_,
+  cv_folds = CV_K_FOLDS,
+  cv_refit_variogram = CV_REFIT_VARIOGRAM,
   cv_observed = quality_cv$observed,
   cv_regression_predicted = quality_cv$regression_only,
   cv_ok_predicted = quality_cv$ordinary_kriging,

@@ -1,0 +1,8 @@
+{
+  "status": "not_built",
+  "created_at": null,
+  "chunking_method": null,
+  "embedding_model": null,
+  "source_metadata": "knowledge/metadata/sources.csv",
+  "notes": "No vector index is built yet. Start with metadata and evidence-card retrieval."
+}

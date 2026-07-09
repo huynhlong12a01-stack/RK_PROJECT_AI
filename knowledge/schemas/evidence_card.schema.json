@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RAG evidence card",
+  "type": "object",
+  "required": ["claim_id", "claim", "applies_to", "evidence_sources", "strength", "conditions", "limitations", "recommended_action", "not_allowed_action"],
+  "properties": {
+    "claim_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+    "claim": {"type": "string"},
+    "applies_to": {"type": "array", "items": {"type": "string"}},
+    "evidence_sources": {"type": "array", "items": {"type": "string"}},
+    "strength": {"type": "string", "enum": ["strong", "moderate", "weak"]},
+    "conditions": {"type": "string"},
+    "limitations": {"type": "string"},
+    "recommended_action": {"type": "string"},
+    "not_allowed_action": {"type": "string"}
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RAG source metadata",
+  "type": "object",
+  "required": ["doc_id", "title", "authors", "year", "source_type", "topic_tags", "quality_level", "notes"],
+  "properties": {
+    "doc_id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+    "title": {"type": "string", "minLength": 1},
+    "authors": {"type": "array", "items": {"type": "string"}},
+    "year": {"type": ["integer", "null"], "minimum": 1800},
+    "source_type": {"type": "string", "enum": ["book", "peer_reviewed_paper", "guideline", "report", "thesis", "documentation"]},
+    "journal_or_publisher": {"type": "string"},
+    "doi": {"type": "string"},
+    "url": {"type": "string"},
+    "access_date": {"type": "string"},
+    "language": {"type": "string"},
+    "topic_tags": {"type": "array", "items": {"type": "string"}},
+    "soil_indicators": {"type": "array", "items": {"type": "string"}},
+    "geography": {"type": "string"},
+    "method_tags": {"type": "array", "items": {"type": "string"}},
+    "quality_level": {"type": "string", "enum": ["core", "supporting", "weak", "exclude"]},
+    "license_or_access_note": {"type": "string"},
+    "notes": {"type": "string"}
+  }
+}

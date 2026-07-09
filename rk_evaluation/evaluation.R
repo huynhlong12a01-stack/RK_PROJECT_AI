@@ -233,7 +233,7 @@ rk_eval_regression <- function(observed, predicted, residuals) {
   list(metrics = m, residual_mean = mean(residuals, na.rm = TRUE), residual_sd = stats::sd(residuals, na.rm = TRUE), residual_skewness = rk_eval_skewness(residuals), warnings = warnings)
 }
 
-rk_eval_cross_validation <- function(observed, predicted_rk, profile, predicted_reg = NULL, predicted_ok = NULL) {
+rk_eval_cross_validation <- function(observed, predicted_rk, profile, predicted_reg = NULL, predicted_ok = NULL, method = NA_character_, cv_folds = NA_integer_, refit_variogram = NA) {
   m <- rk_eval_metrics(observed, predicted_rk)
   warnings <- character(0)
   if (is.finite(m$R2_pred) && m$R2_pred < 0) warnings <- c(warnings, "R²_pred âm; dự báo kém hơn giá trị trung bình mẫu.")
@@ -241,11 +241,12 @@ rk_eval_cross_validation <- function(observed, predicted_rk, profile, predicted_
     br <- rk_eval_metrics(observed, predicted_reg)
     if (is.finite(m$RMSE) && is.finite(br$RMSE) && m$RMSE > 0.95 * br$RMSE) warnings <- c(warnings, "RK không cải thiện rõ so với regression-only.")
   }
+  if (identical(method, "in_sample_fallback")) warnings <- c(warnings, "Không có dự báo cross-validation độc lập; chỉ dùng fallback in-sample nên không được xếp hạng cao.")
   if (!is.null(predicted_ok)) {
     bo <- rk_eval_metrics(observed, predicted_ok)
     if (is.finite(m$RMSE) && is.finite(bo$RMSE) && m$RMSE > 0.95 * bo$RMSE) warnings <- c(warnings, "Biến phụ trợ chưa cải thiện rõ so với nội suy không gian đơn thuần.")
   }
-  list(metrics = m, warnings = unique(warnings))
+  list(metrics = m, method = method, cv_folds = cv_folds, refit_variogram = refit_variogram, leakage_guard = isTRUE(refit_variogram), warnings = unique(warnings))
 }
 
 rk_eval_uncertainty <- function(sd_values) {
@@ -307,6 +308,7 @@ rk_eval_grade <- function(result, profile) {
   cap <- 100
   if ((result$data_quality$n_valid %||% 999) < 30) cap <- min(cap, 69)
   if (is.finite(result$cross_validation$metrics$R2_pred) && result$cross_validation$metrics$R2_pred < 0) cap <- min(cap, 69)
+  if (identical(result$cross_validation$method %||% "", "in_sample_fallback")) cap <- min(cap, 69)
   if (any(grepl("không cải thiện|khong cai thien", result$cross_validation$warnings, ignore.case = TRUE))) cap <- min(cap, 84)
   if (isTRUE(result$class_evaluation$enabled) && is.finite(result$class_evaluation$class_accuracy) && result$class_evaluation$class_accuracy < 0.50 && identical(profile$evaluation_focus, "class_accuracy")) cap <- min(cap, 69)
   score <- min(score, cap)
@@ -330,23 +332,33 @@ rk_eval_interpretation <- function(result, profile) {
     ifelse(length(result$warnings) > 0, "Cần xem các cảnh báo và đề xuất trước khi dùng bản đồ cho quyết định nông học chi tiết.", "Không có cảnh báo lớn theo ngưỡng hiện tại."))
 }
 
-rk_eval_json_escape <- function(x) gsub('"', '\\"', gsub('\\', '\\\\', as.character(x), fixed = TRUE), fixed = TRUE)
-rk_eval_to_json <- function(x) {
-  if (is.null(x)) return("null")
-  if (inherits(x, "table") || is.matrix(x)) x <- as.data.frame.matrix(x)
-  if (is.data.frame(x)) x <- lapply(x, function(col) if (is.factor(col)) as.character(col) else col)
-  if (is.list(x)) {
-    if (is.null(names(x))) return(paste0("[", paste(vapply(x, rk_eval_to_json, character(1)), collapse = ","), "]"))
-    return(paste0("{", paste(vapply(names(x), function(nm) paste0('"', rk_eval_json_escape(nm), '":', rk_eval_to_json(x[[nm]])), character(1)), collapse = ","), "}"))
+rk_eval_json_sanitize <- function(x) {
+  if (is.null(x)) return(NULL)
+  if (inherits(x, "table")) x <- as.data.frame(x, stringsAsFactors = FALSE)
+  if (is.matrix(x)) x <- as.data.frame(x, stringsAsFactors = FALSE)
+  if (is.data.frame(x)) {
+    x <- as.data.frame(lapply(x, function(col) {
+      if (is.factor(col)) as.character(col) else col
+    }), stringsAsFactors = FALSE, check.names = FALSE)
+    return(lapply(seq_len(nrow(x)), function(i) rk_eval_json_sanitize(as.list(x[i, , drop = FALSE]))))
   }
-  scalar_or_array <- function(vals) if (length(vals) == 1) vals else paste0("[", paste(vals, collapse = ","), "]")
-  if (is.character(x)) return(scalar_or_array(paste0('"', rk_eval_json_escape(x), '"')))
-  if (is.logical(x)) return(scalar_or_array(ifelse(is.na(x), "null", tolower(as.character(x)))))
-  if (is.numeric(x) || is.integer(x)) return(scalar_or_array(ifelse(is.na(x) | !is.finite(x), "null", as.character(x))))
-  paste0('"', rk_eval_json_escape(as.character(x)), '"')
+  if (is.list(x)) return(lapply(x, rk_eval_json_sanitize))
+  if (is.factor(x)) x <- as.character(x)
+  if (inherits(x, c("POSIXct", "POSIXlt", "Date"))) x <- as.character(x)
+  if (is.character(x)) {
+    Encoding(x) <- "UTF-8"
+    return(x)
+  }
+  x
 }
-
-rk_eval_write_json <- function(x, path) writeLines(rk_eval_to_json(x), path, useBytes = TRUE)
+rk_eval_write_json <- function(x, path) {
+  if (!requireNamespace("jsonlite", quietly = TRUE)) {
+    stop("Required package jsonlite is missing; run dependency setup before evaluation.", call. = FALSE)
+  }
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  jsonlite::write_json(rk_eval_json_sanitize(x), path, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null")
+  invisible(path)
+}
 
 rk_eval_html_escape <- function(x) gsub("<", "&lt;", gsub(">", "&gt;", as.character(x)))
 rk_eval_rows <- function(x) {
@@ -357,6 +369,7 @@ rk_eval_write_html <- function(result, path) {
   warnings_html <- if (length(result$warnings) == 0) "<p>Không có cảnh báo theo ngưỡng hiện tại.</p>" else paste0("<div class='warn'>", rk_eval_html_escape(result$warnings), "</div>", collapse = "\n")
   rec_html <- paste0("<li>", rk_eval_html_escape(result$recommendations), "</li>", collapse = "\n")
   cls_rows <- if (isTRUE(result$class_evaluation$enabled)) rk_eval_rows(list(class_accuracy = result$class_evaluation$class_accuracy, within_one_class_rate = result$class_evaluation$within_one_class_rate, severe_misclassification_rate = result$class_evaluation$severe_misclassification_rate)) else "<tr><td colspan='2'>Chỉ tiêu này không bật đánh giá phân cấp.</td></tr>"
+  cv_meta <- result$cross_validation[c("method", "cv_folds", "refit_variogram", "leakage_guard")]
   links <- result$report_links %||% list()
   link_html <- paste(vapply(names(links), function(nm) {
     href <- links[[nm]]
@@ -378,14 +391,16 @@ rk_eval_write_html <- function(result, path) {
     "<div class='grid'><section><h2>3. Chất lượng dữ liệu đầu vào</h2><table>", rk_eval_rows(result$data_quality[setdiff(names(result$data_quality), "warnings")]), "</table></section>",
     "<section><h2>4. Regression trend</h2><table>", rk_eval_rows(result$regression$metrics), "</table></section></div>",
     "<div class='grid'><section><h2>5. Residual variogram</h2><table>", rk_eval_rows(result$variogram[setdiff(names(result$variogram), "warnings")]), "</table></section>",
-    "<section><h2>6. Cross-validation</h2><table>", rk_eval_rows(result$cross_validation$metrics), "</table></section></div>",
+    "<section><h2>6. Cross-validation</h2><table>", rk_eval_rows(c(cv_meta, result$cross_validation$metrics)), "</table></section></div>",
     "<div class='grid'><section><h2>7. Phân cấp giá trị</h2><table>", cls_rows, "</table></section>",
-    "<section><h2>8. Uncertainty</h2><table>", rk_eval_rows(result$uncertainty[setdiff(names(result$uncertainty), "warnings")]), "</table></section></div>",
+    "<section><h2>8. Residual kriging uncertainty STD</h2><p>Đây là độ lệch chuẩn kriging phần dư, chưa bao gồm toàn bộ bất định từ mô hình hồi quy và biến phụ trợ.</p><table>", rk_eval_rows(result$uncertainty[setdiff(names(result$uncertainty), "warnings")]), "</table></section></div>",
     "<section><h2>9. Cảnh báo</h2>", warnings_html, "</section>",
     "<section><h2>10. Đề xuất hành động</h2><ul>", rec_html, "</ul></section>",
     "</body></html>"
   )
-  writeLines(html, path, useBytes = TRUE)
+  con <- file(path, open = "wb")
+  on.exit(close(con), add = TRUE)
+  writeBin(charToRaw(paste(html, collapse = "\n")), con)
 }
 rk_eval_recommendations <- function(warnings) {
   txt <- paste(warnings, collapse = " ")
@@ -469,7 +484,7 @@ run_rk_quality_evaluation <- function(context) {
   tr <- rk_eval_transform_recommendation(context$observed, profile)
   reg <- rk_eval_regression(context$observed, context$regression_predicted, context$residuals)
   vg <- rk_eval_variogram(context$variogram_params, context$experimental_variogram, context$coordinates, profile, context$range_max %||% NA_real_)
-  cv <- rk_eval_cross_validation(context$cv_observed, context$cv_rk_predicted, profile, context$cv_regression_predicted, context$cv_ok_predicted)
+  cv <- rk_eval_cross_validation(context$cv_observed, context$cv_rk_predicted, profile, context$cv_regression_predicted, context$cv_ok_predicted, context$cv_method %||% NA_character_, context$cv_folds %||% NA_integer_, context$cv_refit_variogram %||% NA)
   cls <- rk_eval_class_prediction(context$cv_observed, context$cv_rk_predicted, profile)
   unc <- rk_eval_uncertainty(context$prediction_sd_values)
 

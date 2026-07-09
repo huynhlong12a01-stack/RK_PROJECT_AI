@@ -1,0 +1,11 @@
+{
+  "claim_id": "nugget_sill_weak_structure_001",
+  "claim": "A high nugget-to-sill ratio suggests weak spatial dependence or strong short-range/noise effects, so kriging-based maps require cautious interpretation.",
+  "applies_to": ["variogram", "nugget_sill", "spatial_structure"],
+  "evidence_sources": ["goovaerts_1997_geostatistics", "webster_oliver_2007_geostatistics", "isaaks_srivastava_1989_applied_geostatistics"],
+  "strength": "strong",
+  "conditions": "Applies when nugget and sill are estimated from a meaningful experimental variogram with enough point pairs.",
+  "limitations": "High nugget can reflect measurement error, microscale variability, sampling support mismatch, or true weak spatial autocorrelation.",
+  "recommended_action": "Flag high nugget/sill, inspect outliers and sampling density, and avoid high confidence in local map details.",
+  "not_allowed_action": "Do not assign a high final grade when nugget/sill is very high and validation is weak."
+}

@@ -49,7 +49,8 @@ if (!file.exists(point_file)) {
   stop(paste0("Point file not found: ", point_file))
 }
 
-pts <- read.csv(point_file, stringsAsFactors = FALSE, check.names = FALSE)
+agent_require_package("readr")
+pts <- as.data.frame(readr::read_csv(point_file, show_col_types = FALSE, progress = FALSE))
 names(pts) <- clean_names(names(pts))
 
 required_cols <- c(CODE_COL, LAT_COL, LON_COL)
@@ -86,8 +87,61 @@ if (nrow(schema_table) > 0 && any(schema_table$n_values < 30)) {
   warnings <- c(warnings, paste0("Column(s) with fewer than 30 non-missing values: ", paste(schema_table$column[schema_table$n_values < 30], collapse = ", ")))
 }
 
+
+coord_diagnostics <- list(
+  duplicate_code_count = NA_integer_,
+  duplicate_coordinate_count = NA_integer_,
+  conflicting_duplicate_coordinate_columns = character(0),
+  invalid_lat_count = NA_integer_,
+  invalid_lon_count = NA_integer_,
+  possible_lat_lon_swap = FALSE
+)
+
+if (length(missing_required) == 0) {
+  code_vals <- trimws(as.character(pts[[CODE_COL]]))
+  code_vals <- code_vals[!is.na(code_vals) & nzchar(code_vals)]
+  dup_codes <- unique(code_vals[duplicated(code_vals)])
+  coord_diagnostics$duplicate_code_count <- length(dup_codes)
+  if (length(dup_codes) > 0) warnings <- c(warnings, paste0("Duplicate sample code(s): ", paste(head(dup_codes, 20), collapse = ", "), ifelse(length(dup_codes) > 20, " ...", "")))
+
+  lat_num <- suppressWarnings(as.numeric(pts[[LAT_COL]]))
+  lon_num <- suppressWarnings(as.numeric(pts[[LON_COL]]))
+  invalid_lat <- !is.na(lat_num) & (lat_num < -90 | lat_num > 90)
+  invalid_lon <- !is.na(lon_num) & (lon_num < -180 | lon_num > 180)
+  coord_diagnostics$invalid_lat_count <- sum(invalid_lat)
+  coord_diagnostics$invalid_lon_count <- sum(invalid_lon)
+  if (coord_diagnostics$invalid_lat_count > 0) warnings <- c(warnings, paste0("Invalid latitude value count: ", coord_diagnostics$invalid_lat_count))
+  if (coord_diagnostics$invalid_lon_count > 0) warnings <- c(warnings, paste0("Invalid longitude value count: ", coord_diagnostics$invalid_lon_count))
+
+  valid_coord <- is.finite(lat_num) & is.finite(lon_num)
+  if (sum(valid_coord) > 0) {
+    swap_score <- mean(abs(lat_num[valid_coord]) > 90 & abs(lon_num[valid_coord]) <= 90)
+    coord_diagnostics$possible_lat_lon_swap <- is.finite(swap_score) && swap_score > 0.50
+    if (coord_diagnostics$possible_lat_lon_swap) warnings <- c(warnings, "Coordinates look suspicious: latitude/longitude columns may be swapped.")
+
+    coord_key <- paste(round(lon_num[valid_coord], 7), round(lat_num[valid_coord], 7), sep = ",")
+    dup_coord_keys <- unique(coord_key[duplicated(coord_key)])
+    coord_diagnostics$duplicate_coordinate_count <- length(dup_coord_keys)
+    if (length(dup_coord_keys) > 0) warnings <- c(warnings, paste0("Duplicate coordinate location(s): ", length(dup_coord_keys)))
+
+    conflicting_cols <- character(0)
+    if (length(dup_coord_keys) > 0 && length(analysis_cols) > 0) {
+      valid_rows <- which(valid_coord)
+      for (col in analysis_cols) {
+        vals <- suppressWarnings(as.numeric(pts[[col]][valid_rows]))
+        conflict <- any(vapply(dup_coord_keys, function(k) {
+          u <- unique(vals[coord_key == k & is.finite(vals)])
+          length(u) > 1
+        }, logical(1)))
+        if (conflict) conflicting_cols <- c(conflicting_cols, col)
+      }
+    }
+    coord_diagnostics$conflicting_duplicate_coordinate_columns <- conflicting_cols
+    if (length(conflicting_cols) > 0) warnings <- c(warnings, paste0("Duplicate coordinates with different indicator values in column(s): ", paste(conflicting_cols, collapse = ", ")))
+  }
+}
 agent_ensure_dir(dirname(output_json))
-write.csv(schema_table, output_csv, row.names = FALSE, fileEncoding = "UTF-8")
+agent_write_csv(schema_table, output_csv)
 
 result <- list(
   point_file = agent_norm_path(point_file),
@@ -97,6 +151,7 @@ result <- list(
   analysis_columns = analysis_cols,
   n_analysis_columns = length(analysis_cols),
   schema_csv = agent_norm_path(output_csv),
+  coordinate_quality = coord_diagnostics,
   indicators = schema_table,
   warnings = warnings,
   valid = length(missing_required) == 0 && length(analysis_cols) > 0 && (nrow(schema_table) == 0 || all(schema_table$is_numeric))

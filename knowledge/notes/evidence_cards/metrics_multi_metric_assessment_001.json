@@ -1,0 +1,11 @@
+{
+  "claim_id": "metrics_multi_metric_assessment_001",
+  "claim": "Map/model assessment should use multiple metrics because RMSE, MAE, ME, R2_pred, RPD/RPIQ and NSE emphasize different aspects of predictive performance.",
+  "applies_to": ["evaluation_metrics", "model_comparison", "reporting"],
+  "evidence_sources": ["willmott_matsuura_2005_mae_rmse", "nash_sutcliffe_1970_efficiency", "bellon_maurel_2010_rpd_rpiq"],
+  "strength": "moderate",
+  "conditions": "Applies to predictive performance reporting, especially where bias and outliers matter.",
+  "limitations": "Metric thresholds are context-dependent and should not be treated as universal agronomic quality grades.",
+  "recommended_action": "Report at least RMSE, MAE, ME and R2_pred; add RPD/RPIQ/NSE when meaningful.",
+  "not_allowed_action": "Do not hide poor bias or negative R2_pred behind a single favorable metric."
+}

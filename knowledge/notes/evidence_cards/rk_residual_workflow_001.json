@@ -1,0 +1,11 @@
+{
+  "claim_id": "rk_residual_workflow_001",
+  "claim": "Regression Kriging should model the deterministic trend with covariates, model the spatial structure of residuals, krige residuals, and add the kriged residual surface back to the regression prediction.",
+  "applies_to": ["regression_kriging", "workflow", "residual_variogram"],
+  "evidence_sources": ["hengl_2007_about_rk", "hengl_2004_generic_rk_soil", "odeh_1995_regression_kriging_terrain"],
+  "strength": "strong",
+  "conditions": "Applies when covariates are available and the regression residuals still show spatial autocorrelation.",
+  "limitations": "If covariates explain little and residual spatial structure is weak, RK may not improve over regression-only or ordinary kriging.",
+  "recommended_action": "Check regression diagnostics, residual variogram, and compare RK against regression-only and Ordinary Kriging.",
+  "not_allowed_action": "Do not claim RK is scientifically better without baseline comparison and residual variogram diagnostics."
+}

@@ -1,0 +1,11 @@
+{
+  "claim_id": "dsm_covariates_validation_001",
+  "claim": "Digital Soil Mapping commonly uses environmental covariates such as terrain, climate, remote sensing and soil/landscape information, but their usefulness must be validated for each target property and study area.",
+  "applies_to": ["digital_soil_mapping", "covariates", "model_comparison"],
+  "evidence_sources": ["mcbratney_2003_dsm", "minasny_2016_dsm_history", "wadoux_2020_ml_dsm"],
+  "strength": "strong",
+  "conditions": "Applies when covariates such as PCs, DEM-derived variables, NDVI or climate layers are used to predict soil properties.",
+  "limitations": "Covariate relevance depends on soil-forming factors, scale, preprocessing, temporal mismatch, and the target indicator.",
+  "recommended_action": "Report regression strength and compare RK against regression-only and OK to verify whether covariates help.",
+  "not_allowed_action": "Do not assume PC or remote sensing covariates improve prediction without validation evidence."
+}

@@ -1,0 +1,11 @@
+{
+  "claim_id": "uncertainty_kriging_variance_limits_001",
+  "claim": "Kriging variance or residual kriging standard deviation is useful for relative spatial uncertainty, but it does not automatically include all uncertainty from regression model choice, covariates, measurement error, or variogram uncertainty.",
+  "applies_to": ["uncertainty", "kriging_variance", "regression_kriging"],
+  "evidence_sources": ["goovaerts_1997_geostatistics", "hengl_2007_about_rk", "poggio_2021_soilgrids2"],
+  "strength": "strong",
+  "conditions": "Applies to RK outputs where uncertainty map is generated from residual kriging variance/standard deviation.",
+  "limitations": "Full predictive uncertainty requires additional modeling choices not necessarily implemented in the current engine.",
+  "recommended_action": "Label uncertainty maps clearly and recommend additional sampling in large high-uncertainty areas.",
+  "not_allowed_action": "Do not present residual kriging STD as complete total uncertainty unless the engine explicitly models all uncertainty components."
+}

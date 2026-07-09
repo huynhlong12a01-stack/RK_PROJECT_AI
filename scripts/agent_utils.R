@@ -1,7 +1,16 @@
 # ============================================================
 # Agent utility functions for file-based Regression Kriging API.
-# Prefer jsonlite when available; otherwise use a small base-R JSON reader/writer.
+# Dependencies are mandatory; no custom JSON fallback is used.
 # ============================================================
+
+agent_require_package <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop(paste0("Required R package is missing: ", pkg, ". Run .\\check_dependencies.ps1 -Profile all and .\\install_dependencies.ps1 before running this workflow."), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+agent_require_package("jsonlite")
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0) y else x
 
@@ -23,6 +32,25 @@ agent_ensure_dir <- function(path) {
   invisible(path)
 }
 
+agent_json_sanitize <- function(x) {
+  if (is.null(x)) return(NULL)
+  if (inherits(x, "table")) x <- as.data.frame(x, stringsAsFactors = FALSE)
+  if (is.matrix(x)) x <- as.data.frame(x, stringsAsFactors = FALSE)
+  if (is.data.frame(x)) {
+    x <- as.data.frame(lapply(x, function(col) {
+      if (is.factor(col)) as.character(col) else col
+    }), stringsAsFactors = FALSE, check.names = FALSE)
+    return(lapply(seq_len(nrow(x)), function(i) agent_json_sanitize(as.list(x[i, , drop = FALSE]))))
+  }
+  if (is.list(x)) return(lapply(x, agent_json_sanitize))
+  if (is.factor(x)) x <- as.character(x)
+  if (inherits(x, c("POSIXct", "POSIXlt", "Date"))) x <- as.character(x)
+  if (is.character(x)) {
+    Encoding(x) <- "UTF-8"
+    return(x)
+  }
+  x
+}
 agent_json_escape <- function(x) {
   x <- as.character(x)
   x <- gsub("\\", "\\\\", x, fixed = TRUE)
@@ -34,138 +62,18 @@ agent_json_escape <- function(x) {
 }
 
 agent_to_json <- function(x, pretty = TRUE, level = 0) {
-  if (requireNamespace("jsonlite", quietly = TRUE)) {
-    return(jsonlite::toJSON(x, auto_unbox = TRUE, pretty = pretty, null = "null", na = "null"))
-  }
-  indent <- function(n) paste(rep("  ", n), collapse = "")
-  nl <- if (pretty) "\n" else ""
-  sp <- if (pretty) " " else ""
-  if (is.null(x)) return("null")
-  if (!is.list(x) && length(x) == 0) return("[]")
-  if (inherits(x, "table") || is.matrix(x)) x <- as.data.frame.matrix(x)
-  if (is.data.frame(x)) {
-    rows <- lapply(seq_len(nrow(x)), function(i) as.list(x[i, , drop = FALSE]))
-    return(agent_to_json(rows, pretty, level))
-  }
-  if (is.list(x)) {
-    if (length(x) == 0) return(if (is.null(names(x))) "[]" else "{}")
-    if (is.null(names(x))) {
-      vals <- vapply(x, agent_to_json, character(1), pretty = pretty, level = level + 1)
-      return(paste0("[", nl, indent(level + 1), paste(vals, collapse = paste0(",", nl, indent(level + 1))), nl, indent(level), "]"))
-    }
-    vals <- vapply(names(x), function(nm) {
-      paste0('"', agent_json_escape(nm), '":', sp, agent_to_json(x[[nm]], pretty, level + 1))
-    }, character(1))
-    return(paste0("{", nl, indent(level + 1), paste(vals, collapse = paste0(",", nl, indent(level + 1))), nl, indent(level), "}"))
-  }
-  if (is.character(x)) {
-    vals <- paste0('"', agent_json_escape(x), '"')
-    vals[is.na(x)] <- "null"
-    return(if (length(vals) == 1) vals else paste0("[", paste(vals, collapse = ","), "]"))
-  }
-  if (is.logical(x)) {
-    vals <- ifelse(is.na(x), "null", tolower(as.character(x)))
-    return(if (length(vals) == 1) vals else paste0("[", paste(vals, collapse = ","), "]"))
-  }
-  if (is.numeric(x) || is.integer(x)) {
-    vals <- ifelse(is.na(x) | !is.finite(x), "null", as.character(x))
-    return(if (length(vals) == 1) vals else paste0("[", paste(vals, collapse = ","), "]"))
-  }
-  paste0('"', agent_json_escape(as.character(x)), '"')
+  jsonlite::toJSON(agent_json_sanitize(x), auto_unbox = TRUE, pretty = pretty, null = "null", na = "null", dataframe = "rows")
 }
 
 agent_write_json <- function(x, path) {
   agent_ensure_dir(dirname(path))
-  writeLines(agent_to_json(x, pretty = TRUE), path, useBytes = TRUE)
+  jsonlite::write_json(agent_json_sanitize(x), path, auto_unbox = TRUE, pretty = TRUE, null = "null", na = "null")
   invisible(path)
 }
 
 agent_read_json <- function(path) {
-  if (!file.exists(path)) stop(paste0("JSON file not found: ", path))
-  if (requireNamespace("jsonlite", quietly = TRUE)) {
-    return(jsonlite::fromJSON(path, simplifyVector = FALSE))
-  }
-  txt <- paste(readLines(path, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
-  i <- 1L
-  n <- nchar(txt)
-  chr <- function() substr(txt, i, i)
-  skip_ws <- function() while (i <= n && grepl("[[:space:]]", chr())) i <<- i + 1L
-  parse_string <- function() {
-    i <<- i + 1L
-    out <- character(0)
-    while (i <= n) {
-      ch <- chr()
-      if (ch == '"') { i <<- i + 1L; return(paste(out, collapse = "")) }
-      if (ch == "\\") {
-        i <<- i + 1L
-        esc <- chr()
-        out <- c(out, switch(esc, '"'='"', '\\'='\\', '/'='/', 'b'='\b', 'f'='\f', 'n'='\n', 'r'='\r', 't'='\t', esc))
-        i <<- i + 1L
-      } else {
-        out <- c(out, ch)
-        i <<- i + 1L
-      }
-    }
-    stop("Unterminated JSON string")
-  }
-  parse_number <- function() {
-    start <- i
-    while (i <= n && grepl("[0-9eE+.-]", chr())) i <<- i + 1L
-    as.numeric(substr(txt, start, i - 1L))
-  }
-  parse_literal <- function(lit, val) {
-    if (substr(txt, i, i + nchar(lit) - 1L) != lit) stop(paste0("Invalid JSON near: ", substr(txt, i, min(n, i + 20L))))
-    i <<- i + nchar(lit)
-    val
-  }
-  parse_array <- function() {
-    i <<- i + 1L
-    out <- list()
-    skip_ws()
-    if (i <= n && chr() == "]") { i <<- i + 1L; return(out) }
-    repeat {
-      out[[length(out) + 1L]] <- parse_value()
-      skip_ws()
-      if (chr() == "]") { i <<- i + 1L; return(out) }
-      if (chr() != ",") stop("Expected comma in JSON array")
-      i <<- i + 1L
-    }
-  }
-  parse_object <- function() {
-    i <<- i + 1L
-    out <- list()
-    skip_ws()
-    if (i <= n && chr() == "}") { i <<- i + 1L; return(out) }
-    repeat {
-      skip_ws()
-      if (chr() != '"') stop("Expected string key in JSON object")
-      key <- parse_string()
-      skip_ws()
-      if (chr() != ":") stop("Expected colon in JSON object")
-      i <<- i + 1L
-      out[[key]] <- parse_value()
-      skip_ws()
-      if (chr() == "}") { i <<- i + 1L; return(out) }
-      if (chr() != ",") stop("Expected comma in JSON object")
-      i <<- i + 1L
-    }
-  }
-  parse_value <- function() {
-    skip_ws()
-    ch <- chr()
-    if (ch == '"') return(parse_string())
-    if (ch == "{") return(parse_object())
-    if (ch == "[") return(parse_array())
-    if (grepl("[-0-9]", ch)) return(parse_number())
-    if (substr(txt, i, i + 3L) == "true") return(parse_literal("true", TRUE))
-    if (substr(txt, i, i + 4L) == "false") return(parse_literal("false", FALSE))
-    if (substr(txt, i, i + 3L) == "null") return(parse_literal("null", NULL))
-    stop(paste0("Invalid JSON value near: ", substr(txt, i, min(n, i + 20L))))
-  }
-  value <- parse_value()
-  skip_ws()
-  if (i <= n) stop("Trailing content after JSON value")
-  value
+  if (!file.exists(path)) stop(paste0("JSON file not found: ", path), call. = FALSE)
+  jsonlite::fromJSON(path, simplifyVector = FALSE)
 }
 
 agent_allowed_parameters <- function() {
@@ -175,6 +83,7 @@ agent_allowed_parameters <- function() {
     "AUTO_NEIGHBOR_SEARCH_RADIUS_CANDIDATES", "AUTO_NEIGHBOR_CV_METHOD", "AUTO_NEIGHBOR_MAX_CANDIDATES",
     "CV_METHODS", "CV_K_FOLDS", "CLAMP_TO_SAMPLE_RANGE", "TARGET_TRANSFORM")
 }
+
 agent_protected_parameters <- function() {
   c("POINT_FILE", "RASTER_DIR", "ROI_FILE", "UTM_EPSG", "EXPORT_EPSG", "CODE_COL", "LAT_COL", "LON_COL",
     "RASTER_PATTERN", "OUTPUT_RESOLUTION", "USE_COMPLETE_PC_MASK", "REGRESSION_FORMULA", "raw_input_data", "source_scripts")
@@ -262,7 +171,15 @@ agent_r_literal <- function(x) {
 
 agent_read_csv_if_exists <- function(path) {
   if (!file.exists(path)) return(data.frame())
-  tryCatch(read.csv(path, stringsAsFactors = FALSE), error = function(e) data.frame())
+  agent_require_package("readr")
+  tryCatch(as.data.frame(readr::read_csv(path, show_col_types = FALSE, progress = FALSE)), error = function(e) data.frame())
+}
+
+agent_write_csv <- function(x, path) {
+  agent_require_package("readr")
+  agent_ensure_dir(dirname(path))
+  readr::write_csv(x, path, na = "")
+  invisible(path)
 }
 
 agent_pick_model_metric <- function(model_comparison, model, field = "RMSE", preferred_method = "spatial_kmeans") {

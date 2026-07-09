@@ -1,0 +1,19 @@
+{
+  "doc_id": "unique_id",
+  "title": "",
+  "authors": [],
+  "year": null,
+  "source_type": "book | peer_reviewed_paper | guideline | report | thesis | documentation",
+  "journal_or_publisher": "",
+  "doi": "",
+  "url": "",
+  "access_date": "YYYY-MM-DD",
+  "language": "en | vi | other",
+  "topic_tags": [],
+  "soil_indicators": [],
+  "geography": "",
+  "method_tags": [],
+  "quality_level": "core | supporting | weak | exclude",
+  "license_or_access_note": "",
+  "notes": ""
+}

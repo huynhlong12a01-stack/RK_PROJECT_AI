@@ -29,6 +29,8 @@ score_run <- function(r) {
   vg <- r$variogram %||% list()
   cmp <- r$model_comparison %||% list()
   warnings <- r$warnings %||% character(0)
+  cls <- r$class_evaluation %||% list()
+  unc <- r$uncertainty %||% list()
   rmse <- as_num(m$rk_rmse)
   mae <- as_num(m$rk_mae)
   me <- as_num(m$rk_me)
@@ -37,6 +39,10 @@ score_run <- function(r) {
   rpd <- as_num(m$rpd)
   nug_ratio <- as_num(vg$nugget_sill_ratio)
   range_hit <- isTRUE(vg$range_hit_max)
+  class_acc <- as_num(cls$class_accuracy)
+  severe_class <- as_num(cls$severe_misclassification_rate)
+  unc_high <- as_num(unc$high_uncertainty_area_percent)
+  mean_sd <- as_num(unc$mean_sd)
   reg_rmse <- as_num(cmp$regression_rmse)
   ok_rmse <- as_num(cmp$ordinary_kriging_rmse)
   rk_rmse <- as_num(cmp$regression_kriging_rmse)
@@ -51,6 +57,20 @@ score_run <- function(r) {
   if (!range_hit) { score <- score + 6; reasons <- c(reasons, "Range does not hit configured maximum.") } else { score <- score - 15; penalties <- c(penalties, "Range hits maximum limit.") }
   if (is.finite(nrmse) && nrmse <= 0.25) score <- score + 5
   if (is.finite(rpd) && rpd >= 1.4) score <- score + 5
+  if (isTRUE(cls$enabled) && is.finite(class_acc)) {
+    if (class_acc >= 0.70) { score <- score + 8; reasons <- c(reasons, "Class accuracy is good.") }
+    else if (class_acc >= 0.50) { score <- score + 2; reasons <- c(reasons, "Class accuracy is acceptable.") }
+    else { score <- score - 10; penalties <- c(penalties, "Class accuracy is low.") }
+  }
+  if (isTRUE(cls$enabled) && is.finite(severe_class) && severe_class > 0.10) {
+    score <- score - 8
+    penalties <- c(penalties, "Severe class misclassification is high.")
+  }
+  if (isTRUE(unc$available) && is.finite(unc_high)) {
+    if (unc_high > 50) { score <- score - 10; penalties <- c(penalties, "High uncertainty covers more than half of evaluated cells.") }
+    else if (unc_high > 30) { score <- score - 6; penalties <- c(penalties, "High uncertainty covers a large area.") }
+    else { score <- score + 3; reasons <- c(reasons, "Uncertainty high-area share is acceptable.") }
+  }
   warning_count <- length(warnings)
   score <- score - min(20, warning_count * 2)
   if (warning_count > 0) penalties <- c(penalties, paste0(warning_count, " warning(s) were reported."))
@@ -73,7 +93,20 @@ runs <- lapply(files, function(f) { x <- agent_read_json(f); x$.source_file <- a
 run_ids <- vapply(runs, function(r) as.character(r$run_id %||% r$.source_file), character(1))
 runs <- runs[!duplicated(run_ids)]
 completed <- Filter(function(r) identical(r$status, "completed"), runs)
-if (length(completed) == 0) stop("No completed run_result.json files found.")
+
+filter_target <- args$target %||% ""
+filter_run_prefix <- args$run_prefix %||% ""
+filter_source_contains <- args$source_contains %||% ""
+if (nzchar(filter_target)) {
+  completed <- Filter(function(r) identical(as.character(r$target_field %||% ""), as.character(filter_target)), completed)
+}
+if (nzchar(filter_run_prefix)) {
+  completed <- Filter(function(r) startsWith(as.character(r$run_id %||% ""), as.character(filter_run_prefix)), completed)
+}
+if (nzchar(filter_source_contains)) {
+  completed <- Filter(function(r) grepl(as.character(filter_source_contains), as.character(r$.source_file %||% ""), fixed = TRUE), completed)
+}
+if (length(completed) == 0) stop("No completed run_result.json files matched the requested filters.")
 
 scored <- lapply(completed, score_run)
 scores <- vapply(scored, function(x) x$score, numeric(1))
@@ -107,6 +140,10 @@ summary <- data.frame(
   nugget_sill_ratio = vapply(completed, function(r) as_num(r$variogram$nugget_sill_ratio), numeric(1)),
   variogram_range = vapply(completed, function(r) as_num(r$variogram$range), numeric(1)),
   range_hit_max = vapply(completed, function(r) isTRUE(r$variogram$range_hit_max), logical(1)),
+  class_accuracy = vapply(completed, function(r) as_num(r$class_evaluation$class_accuracy), numeric(1)),
+  severe_misclassification_rate = vapply(completed, function(r) as_num(r$class_evaluation$severe_misclassification_rate), numeric(1)),
+  high_uncertainty_area_percent = vapply(completed, function(r) as_num(r$uncertainty$high_uncertainty_area_percent), numeric(1)),
+  mean_prediction_sd = vapply(completed, function(r) as_num(r$uncertainty$mean_sd), numeric(1)),
   n_warnings = vapply(completed, function(r) length(r$warnings %||% character(0)), integer(1)),
   source_file = vapply(completed, function(r) r$.source_file, character(1)),
   stringsAsFactors = FALSE
@@ -119,12 +156,13 @@ result <- list(
   why_not_lowest_rmse = why_not_lowest,
   human_review_required = human_review,
   compared_run_count = length(completed),
+  filters = list(target = if (nzchar(filter_target)) filter_target else NULL, run_prefix = if (nzchar(filter_run_prefix)) filter_run_prefix else NULL, source_contains = if (nzchar(filter_source_contains)) filter_source_contains else NULL),
   comparison_csv = agent_norm_path(summary_csv),
   selected_files = selected$files %||% list(),
   stop_conditions = c("Grade A/B without severe warnings", "No useful improvement after repeated reruns", "RMSE improves but variogram diagnostics degrade", "max_iterations reached", "AI requested MANUAL_REVIEW", "R2_pred remains negative", "No valid variogram candidate", "Validator rejects AI decision")
 )
 agent_ensure_dir(dirname(output_path))
 agent_write_json(result, output_path)
-write.csv(summary, summary_csv, row.names = FALSE)
+agent_write_csv(summary, summary_csv)
 cat("[INFO] Run comparison written to ", agent_norm_path(output_path), "\n", sep = "")
 cat("[INFO] Selected run: ", selected$run_id, "\n", sep = "")
