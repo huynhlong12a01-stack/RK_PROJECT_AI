@@ -45,7 +45,23 @@ bad_range_validated <- agent_read_json(bad_range_out)
 if (isTRUE(bad_range_validated$valid) || !("MANUAL_RANGE" %in% names(bad_range_validated$rejected_parameters))) fail("out-of-range MANUAL_RANGE was not rejected")
 ok("rejected out-of-range parameter")
 
-# 5. Test compare two fake run_result.json files.
+# 5. Test TARGET_TRANSFORM is accepted when valid and rejected when invalid.
+transform_decision <- list(decision = "RERUN", confidence = "medium", reason = "test transform", next_parameters = list(TARGET_TRANSFORM = "log1p"), must_keep = list(RUN_CROSS_VALIDATION = TRUE), human_review_required = FALSE)
+transform_file <- file.path(bad_dir, "transform_decision.json")
+transform_out <- file.path(bad_dir, "transform_validated.json")
+agent_write_json(transform_decision, transform_file)
+status <- system2(Sys.which("Rscript"), c("scripts/agent_validate_decision.R", "--decision", transform_file, "--request", "agent/requests/run_request_template.json", "--output", transform_out), stdout = TRUE, stderr = TRUE)
+transform_validated <- agent_read_json(transform_out)
+if (!isTRUE(transform_validated$valid) || !identical(transform_validated$accepted_parameters$TARGET_TRANSFORM, "log1p")) fail("valid TARGET_TRANSFORM was not accepted")
+invalid_transform <- list(decision = "RERUN", confidence = "medium", reason = "test transform", next_parameters = list(TARGET_TRANSFORM = "sqrt"), must_keep = list(RUN_CROSS_VALIDATION = TRUE), human_review_required = FALSE)
+invalid_transform_file <- file.path(bad_dir, "invalid_transform_decision.json")
+invalid_transform_out <- file.path(bad_dir, "invalid_transform_validated.json")
+agent_write_json(invalid_transform, invalid_transform_file)
+status <- suppressWarnings(system2(Sys.which("Rscript"), c("scripts/agent_validate_decision.R", "--decision", invalid_transform_file, "--request", "agent/requests/run_request_template.json", "--output", invalid_transform_out), stdout = TRUE, stderr = TRUE))
+invalid_transform_validated <- agent_read_json(invalid_transform_out)
+if (isTRUE(invalid_transform_validated$valid) || !("TARGET_TRANSFORM" %in% names(invalid_transform_validated$rejected_parameters))) fail("invalid TARGET_TRANSFORM was not rejected")
+ok("validated TARGET_TRANSFORM parameter")
+# 6. Test compare two fake run_result.json files.
 fake_dir <- file.path(bad_dir, "fake_results")
 agent_ensure_dir(fake_dir)
 fake_low_rmse_bad <- list(run_id = "fake_low_rmse_bad", target_field = "pH", status = "completed", quality = list(final_grade = "B", final_score = 75), metrics = list(rk_rmse = 0.30, rk_mae = 0.20, rk_me = 0.15, rk_r2_pred = -0.10, nrmse_mean = 0.05, rpd = 1.7), model_comparison = list(regression_rmse = 0.31, ordinary_kriging_rmse = 0.29, regression_kriging_rmse = 0.30), variogram = list(nugget_sill_ratio = 0.90, range = 8000, range_hit_max = TRUE), warnings = c("Range hits maximum", "R2 negative"), files = list())
@@ -59,7 +75,38 @@ comparison <- agent_read_json(compare_out)
 if (!identical(comparison$selected_run_id, "fake_good")) fail("compare runs selected lowest RMSE despite bad diagnostics")
 ok("compared fake runs without choosing lowest RMSE blindly")
 
-# 6. Test README command examples are syntactically plausible.
+# 7. Test compare penalizes poor class accuracy and high uncertainty.
+fake_class_dir <- file.path(bad_dir, "fake_class_uncertainty_results")
+agent_ensure_dir(fake_class_dir)
+fake_low_rmse_class_bad <- list(
+  run_id = "fake_low_rmse_class_bad", target_field = "P", status = "completed",
+  quality = list(final_grade = "B", final_score = 78),
+  metrics = list(rk_rmse = 0.25, rk_mae = 0.18, rk_me = 0.00, rk_r2_pred = 0.40, nrmse_mean = 0.08, rpd = 1.8),
+  model_comparison = list(regression_rmse = 0.40, ordinary_kriging_rmse = 0.28, regression_kriging_rmse = 0.25),
+  variogram = list(nugget_sill_ratio = 0.20, range = 3500, range_hit_max = FALSE),
+  class_evaluation = list(enabled = TRUE, class_accuracy = 0.35, within_one_class_rate = 0.65, severe_misclassification_rate = 0.25),
+  uncertainty = list(available = TRUE, mean_sd = 0.12, high_uncertainty_area_percent = 65),
+  warnings = c("Class accuracy is low", "High uncertainty area is large"), files = list()
+)
+fake_higher_rmse_class_good <- list(
+  run_id = "fake_higher_rmse_class_good", target_field = "P", status = "completed",
+  quality = list(final_grade = "B", final_score = 76),
+  metrics = list(rk_rmse = 0.29, rk_mae = 0.19, rk_me = 0.01, rk_r2_pred = 0.35, nrmse_mean = 0.09, rpd = 1.7),
+  model_comparison = list(regression_rmse = 0.40, ordinary_kriging_rmse = 0.30, regression_kriging_rmse = 0.29),
+  variogram = list(nugget_sill_ratio = 0.22, range = 3400, range_hit_max = FALSE),
+  class_evaluation = list(enabled = TRUE, class_accuracy = 0.78, within_one_class_rate = 0.93, severe_misclassification_rate = 0.02),
+  uncertainty = list(available = TRUE, mean_sd = 0.10, high_uncertainty_area_percent = 10),
+  warnings = character(0), files = list()
+)
+agent_write_json(fake_low_rmse_class_bad, file.path(fake_class_dir, "fake_low_rmse_class_bad_run_result.json"))
+agent_write_json(fake_higher_rmse_class_good, file.path(fake_class_dir, "fake_higher_rmse_class_good_run_result.json"))
+class_compare_out <- file.path(bad_dir, "fake_class_uncertainty_compare.json")
+status <- system2(Sys.which("Rscript"), c("scripts/agent_compare_runs.R", "--results", fake_class_dir, "--include_output", "false", "--output", class_compare_out), stdout = TRUE, stderr = TRUE)
+if (!file.exists(class_compare_out)) fail("compare runs did not produce class/uncertainty output")
+class_comparison <- agent_read_json(class_compare_out)
+if (!identical(class_comparison$selected_run_id, "fake_higher_rmse_class_good")) fail("compare runs ignored class accuracy/uncertainty penalties")
+ok("compared fake runs with class accuracy and uncertainty penalties")
+# 8. Test README command examples are syntactically plausible.
 if (!file.exists("README.md") || !file.exists("AGENT_README.md")) fail("README files are missing")
 readme <- paste(readLines("README.md", warn = FALSE), collapse = "\n")
 agent_readme <- paste(readLines("AGENT_README.md", warn = FALSE), collapse = "\n")

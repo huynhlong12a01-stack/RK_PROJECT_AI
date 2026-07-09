@@ -20,6 +20,12 @@ RK_DEPENDENCIES <- list(
     "tibble",
     "rlang"
   ),
+  agent = c(
+    "jsonlite",
+    "readr",
+    "digest",
+    "yaml"
+  ),
   rag = c(
     "pdftools",
     "digest",

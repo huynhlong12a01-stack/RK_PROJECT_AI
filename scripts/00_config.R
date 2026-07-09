@@ -89,6 +89,8 @@ AUTO_NEIGHBOR_CV_METHOD <- "spatial_kmeans"
 AUTO_NEIGHBOR_MAX_CANDIDATES <- 50
 
 CLAMP_TO_SAMPLE_RANGE <- TRUE
+# "auto" uses the evaluation profile/recommendation; options: "auto", "none", "log1p".
+TARGET_TRANSFORM <- "auto"
 # ============================================================
 # Scientific validation and model comparison
 # ============================================================

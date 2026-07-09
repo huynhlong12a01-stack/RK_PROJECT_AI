@@ -7,17 +7,24 @@ Tài liệu này dành cho Codex hoặc AI agent khi làm việc trong dự án 
 Luôn kiểm tra môi trường trước khi chạy thật:
 
 ```powershell
-.\check_dependencies.ps1 -Profile all
+.\check_dependencies.ps1 -Profile "core,agent"
+```
+
+Nếu cần RAG hoặc xử lý bảng nâng cao:
+
+```powershell
+.\check_dependencies.ps1 -Profile "tidy_io,rag"
 ```
 
 Nếu thiếu package và người dùng cho phép:
 
 ```powershell
-.\install_dependencies.ps1 -Profile "core,rag"
+.\install_dependencies.ps1 -Profile "core,agent"
+.\install_dependencies.ps1 -Profile "tidy_io,rag"
 .\install_dependencies.ps1 -Profile "geostat_extra,spatial_cv,modeling"
 ```
 
-Không chạy RK thật khi thiếu `sf`, `terra`, `gstat`, `sp`, `jsonlite`, `readr`. Không build PDF RAG khi thiếu `pdftools`. Không tự gọi `install.packages()` rời rạc nếu wrapper còn hoạt động.
+Không chạy RK thật khi thiếu `sf`, `terra`, `gstat`, `sp`, `jsonlite`, `readr`. Không tự gọi `install.packages()` rời rạc nếu wrapper còn hoạt động.
 
 ## 1. Entry Points
 
@@ -27,7 +34,7 @@ Không chạy RK thật khi thiếu `sf`, `terra`, `gstat`, `sp`, `jsonlite`, `r
 - Batch nhiều chỉ tiêu: `run_agent_batch.ps1` -> `scripts/agent_batch_run.R`.
 - Agent loop có kiểm soát: `run_agent_loop.ps1` -> `scripts/agent_loop.R`.
 - Validator: `scripts/agent_validate_decision.R`.
-- Compare: `scripts/agent_compare_runs.R` hoặc `run_agent_compare.ps1`, có filter theo target/run prefix/source và có tính thêm class accuracy/uncertainty nếu output có sẵn.
+- Compare: `scripts/agent_compare_runs.R` hoặc `run_agent_compare.ps1`.
 - Evaluation rules: `rk_evaluation/evaluation.R`.
 - Request template: `agent/requests/run_request_template.json`.
 
@@ -81,10 +88,12 @@ Normal RK:
 ```text
 agent/responses/<run_id>_run_result.json
 agent/responses/final_decision_<target>_<loop_id>.json
+agent/history/<loop_id>/rag_context_iter_001.json
 output/agent_runs/<run_id>/06_report/json/evaluation_<target>.json
 output/agent_runs/<run_id>/06_report/tables/model_comparison_<target>.csv
 output/agent_runs/<run_id>/06_report/tables/cv_results_<target>.csv
 output/agent_runs/<run_id>/06_report/tables/neighbor_tuning_<target>.csv
+output/agent_runs/<run_id>/03_variogram/variogram_candidate_results_<target>.csv
 output/agent_runs/<run_id>/06_report/interactive/variogram_interactive_<target>.html
 ```
 
@@ -101,6 +110,7 @@ Không chọn mô hình chỉ vì RMSE thấp nhất. Cần xét:
 - Ít cảnh báo nghiêm trọng.
 - Class accuracy hợp lý nếu chỉ tiêu có phân cấp.
 - Uncertainty hợp lý nếu có.
+- Transform đã dùng có phù hợp phân phối chỉ tiêu không.
 
 Dữ liệu random/test không dùng để chứng minh RK tốt hơn; chỉ dùng để kiểm tra workflow.
 
@@ -129,7 +139,7 @@ CLAMP_TO_SAMPLE_RANGE
 TARGET_TRANSFORM
 ```
 
-`TARGET_TRANSFORM` hiện là tham số giữ chỗ; validator sẽ từ chối nếu engine chưa hỗ trợ transform thật.
+`TARGET_TRANSFORM` đã được implement trong engine với giá trị hợp lệ `auto`, `none`, `log1p`. Khi dùng `log1p`, engine fit regression và kriging residual trên thang transform, back-transform prediction về đơn vị gốc, và tính CV metric trên đơn vị gốc. Nếu dữ liệu âm, validator vẫn nhận tham số nhưng engine sẽ fallback về `none` và ghi cảnh báo.
 
 ## 7. Protected Settings
 
@@ -153,7 +163,7 @@ source scripts
 main engine logic
 ```
 
-## 8. Auto-Neighbor
+## 8. Auto-Neighbor Và Candidate Tables
 
 Mặc định bật `AUTO_NEIGHBORS <- TRUE`. Khi báo cáo kết quả, luôn nêu:
 
@@ -162,9 +172,10 @@ selected_nmax_neighbors
 selected_search_radius
 auto_neighbors_method
 neighbor_tuning file
+variogram_candidate_results file
 ```
 
-Không chỉnh thủ công neighbor nếu chưa đọc cảnh báo trong report.
+Agent loop hiện đọc thêm `neighbor_tuning_<target>.csv` và `variogram_candidate_results_<target>.csv` nếu có để đề xuất rerun cụ thể hơn. Không chỉnh thủ công neighbor nếu chưa đọc cảnh báo trong report.
 
 ## 9. Stop Conditions
 
@@ -174,9 +185,9 @@ Dừng nếu:
 - Đạt `MAX_ITERATIONS`.
 - Validator từ chối.
 - MANUAL_REVIEW hoặc REJECT.
-- Hai lần rerun liên tiếp không cải thiện RMSE khoảng 3-5%.
+- Hai lần rerun liên tiếp không cải thiện RMSE khoảng 3-5% và cũng không cải thiện diagnostic như nugget/sill, range_hit_max, class accuracy hoặc uncertainty.
 - RMSE tốt hơn nhưng variogram xấu hơn rõ.
-- R²_pred vẫn âm.
+- R²_pred vẫn âm sau nhiều iteration.
 - Không có candidate variogram/neighborhood hợp lệ.
 
 ## 10. RAG Local
@@ -189,7 +200,7 @@ Inventory, index và query tài liệu local:
 .\run_rag_query.ps1 -Query "variogram range spatial CV" -TopK 8
 ```
 
-Không tải, chia sẻ hoặc commit tài liệu bản quyền. Chỉ dùng tài liệu local do người dùng cung cấp hợp pháp.
+Không tải, chia sẻ hoặc commit tài liệu bản quyền. Chỉ dùng tài liệu local do người dùng cung cấp hợp pháp. Agent loop không gọi LLM, nhưng tạo `rag_context_iter_*.json` để agent bên ngoài có câu truy vấn và evidence card nội bộ khi viết `ai_decision.json`.
 
 ## 11. Không Được Làm
 

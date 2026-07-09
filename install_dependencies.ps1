@@ -1,5 +1,5 @@
 param(
-  [string]$Profile = "core,rag",
+  [string]$Profile = "core,agent",
   [string]$Repos = "https://cloud.r-project.org"
 )
 

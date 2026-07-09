@@ -65,12 +65,169 @@ should_accept_result <- function(result) {
   grade %in% c("A", "B") && identical(hint, "ACCEPTABLE") && is.finite(r2) && r2 > 0 && !result_has_severe_warning(result)
 }
 
+result_csv_path <- function(result, key, fallback = NULL) {
+  p <- result$files[[key]] %||% fallback %||% NA_character_
+  if (is.null(p) || length(p) == 0 || is.na(p) || !nzchar(p)) return(NA_character_)
+  p <- agent_norm_path(p)
+  if (file.exists(p)) return(p)
+  p2 <- gsub("/", .Platform$file.sep, p, fixed = TRUE)
+  if (file.exists(p2)) return(p2)
+  p
+}
+
+read_result_csv <- function(result, key, fallback = NULL) {
+  p <- result_csv_path(result, key, fallback)
+  if (is.na(p) || !file.exists(p)) return(data.frame())
+  d <- agent_read_csv_if_exists(p)
+  if (nrow(d) > 0) d$.source_file <- agent_norm_path(p)
+  d
+}
+
+best_variogram_candidate <- function(result) {
+  target_name <- agent_safe_name(result$target_field %||% "target")
+  fallback <- file.path(result$output_folder %||% "", "03_variogram", paste0("variogram_candidate_results_", target_name, ".csv"))
+  d <- read_result_csv(result, "variogram_candidate_csv", fallback)
+  if (nrow(d) == 0) return(NULL)
+  required <- c("candidate_score", "fitted_range")
+  if (!all(required %in% names(d))) return(NULL)
+  d$candidate_score_num <- suppressWarnings(as.numeric(d$candidate_score))
+  d$sse_num <- suppressWarnings(as.numeric(d$sse %||% NA_real_))
+  d$fitted_range_num <- suppressWarnings(as.numeric(d$fitted_range))
+  d$nugget_sill_ratio_num <- suppressWarnings(as.numeric(d$nugget_sill_ratio %||% NA_real_))
+  valid <- d[is.finite(d$candidate_score_num) & is.finite(d$fitted_range_num), , drop = FALSE]
+  if (nrow(valid) == 0) return(NULL)
+  valid <- valid[order(valid$candidate_score_num, valid$sse_num), , drop = FALSE]
+  best <- valid[1, , drop = FALSE]
+  list(
+    model = as.character((best$fitted_model %||% best$model)[1]),
+    nugget = suppressWarnings(as.numeric(best$fitted_nugget[1] %||% NA_real_)),
+    psill = suppressWarnings(as.numeric(best$fitted_psill[1] %||% NA_real_)),
+    range = suppressWarnings(as.numeric(best$fitted_range[1] %||% NA_real_)),
+    nugget_sill_ratio = suppressWarnings(as.numeric(best$nugget_sill_ratio[1] %||% NA_real_)),
+    range_hit_max = isTRUE(best$range_hit_max[1]) || identical(tolower(as.character(best$range_hit_max[1])), "true"),
+    diagnostic_flags = as.character(best$diagnostic_flags[1] %||% ""),
+    candidate_score = suppressWarnings(as.numeric(best$candidate_score[1] %||% NA_real_)),
+    source_file = as.character(best$.source_file[1] %||% NA_character_)
+  )
+}
+
+best_neighbor_candidate <- function(result) {
+  d <- read_result_csv(result, "neighbor_tuning_csv")
+  if (nrow(d) == 0 || !("score" %in% names(d))) return(NULL)
+  d$score_num <- suppressWarnings(as.numeric(d$score))
+  d$n_missing_num <- suppressWarnings(as.numeric(d$n_missing %||% NA_real_))
+  d$rmse_num <- suppressWarnings(as.numeric(d$RK_RMSE %||% NA_real_))
+  valid <- d[is.finite(d$score_num), , drop = FALSE]
+  if ("status" %in% names(valid)) valid <- valid[tolower(as.character(valid$status)) == "ok", , drop = FALSE]
+  if (nrow(valid) == 0) return(NULL)
+  valid <- valid[order(valid$score_num, valid$n_missing_num, valid$rmse_num), , drop = FALSE]
+  best <- valid[1, , drop = FALSE]
+  list(
+    nmax = as.integer(best$nmax_neighbors[1]),
+    radius = as.numeric(best$search_radius[1]),
+    score = as.numeric(best$score[1]),
+    rmse = suppressWarnings(as.numeric(best$RK_RMSE[1] %||% NA_real_)),
+    r2 = suppressWarnings(as.numeric(best$RK_R2_pred[1] %||% NA_real_)),
+    source_file = as.character(best$.source_file[1] %||% NA_character_)
+  )
+}
+
+baseline_diagnostics <- function(result) {
+  cmp <- result$model_comparison %||% list()
+  rk <- as_num(cmp$regression_kriging_rmse %||% result$metrics$rk_rmse)
+  reg <- as_num(cmp$regression_rmse)
+  ok <- as_num(cmp$ordinary_kriging_rmse)
+  list(
+    rk_rmse = rk,
+    regression_rmse = reg,
+    ok_rmse = ok,
+    rk_worse_than_regression = is.finite(rk) && is.finite(reg) && rk > 1.03 * reg,
+    rk_not_better_than_regression = is.finite(rk) && is.finite(reg) && rk >= 0.98 * reg,
+    rk_worse_than_ok = is.finite(rk) && is.finite(ok) && rk > 1.05 * ok,
+    rk_not_better_than_ok = is.finite(rk) && is.finite(ok) && rk > 1.03 * ok
+  )
+}
+
+result_r2_negative_streak <- function(results, n = 2L) {
+  if (length(results) < n) return(FALSE)
+  tail_results <- tail(results, n)
+  vals <- vapply(tail_results, function(x) as_num(x$metrics$rk_r2_pred), numeric(1))
+  all(is.finite(vals) & vals < 0)
+}
+
+diagnostics_improved <- function(previous, current) {
+  reasons <- character(0)
+  prev_nug <- as_num(previous$variogram$nugget_sill_ratio)
+  curr_nug <- as_num(current$variogram$nugget_sill_ratio)
+  if (is.finite(prev_nug) && is.finite(curr_nug) && curr_nug <= prev_nug - 0.05) reasons <- c(reasons, "nugget_sill_decreased")
+  if (isTRUE(previous$variogram$range_hit_max) && !isTRUE(current$variogram$range_hit_max)) reasons <- c(reasons, "range_no_longer_hits_max")
+  prev_class <- as_num(previous$class_evaluation$class_accuracy)
+  curr_class <- as_num(current$class_evaluation$class_accuracy)
+  if (is.finite(prev_class) && is.finite(curr_class) && curr_class >= prev_class + 0.03) reasons <- c(reasons, "class_accuracy_improved")
+  prev_severe <- as_num(previous$class_evaluation$severe_misclassification_rate)
+  curr_severe <- as_num(current$class_evaluation$severe_misclassification_rate)
+  if (is.finite(prev_severe) && is.finite(curr_severe) && curr_severe <= prev_severe - 0.03) reasons <- c(reasons, "severe_misclassification_decreased")
+  prev_unc <- as_num(previous$uncertainty$high_uncertainty_area_percent)
+  curr_unc <- as_num(current$uncertainty$high_uncertainty_area_percent)
+  if (is.finite(prev_unc) && is.finite(curr_unc) && curr_unc <= prev_unc - 5) reasons <- c(reasons, "high_uncertainty_area_decreased")
+  prev_r2 <- as_num(previous$metrics$rk_r2_pred)
+  curr_r2 <- as_num(current$metrics$rk_r2_pred)
+  if (is.finite(prev_r2) && is.finite(curr_r2) && curr_r2 >= prev_r2 + 0.05) reasons <- c(reasons, "r2_pred_improved")
+  list(improved = length(reasons) > 0, reasons = reasons)
+}
+
+build_rag_queries <- function(result) {
+  warnings_text <- paste(result$warnings %||% character(0), collapse = " ")
+  vg <- result$variogram %||% list()
+  cmp <- baseline_diagnostics(result)
+  queries <- c("regression kriging soil mapping cross validation variogram diagnostics")
+  if (isTRUE(vg$range_hit_max) || grepl("range|cutoff|variogram", warnings_text, ignore.case = TRUE)) {
+    queries <- c(queries, "soil variogram range cutoff practical range over smoothing")
+  }
+  if (as_num(vg$nugget_sill_ratio) > 0.75 || grepl("nugget", warnings_text, ignore.case = TRUE)) {
+    queries <- c(queries, "high nugget sill ratio soil geostatistics outlier sampling support laboratory error")
+  }
+  if (as_num(result$metrics$rk_r2_pred) < 0) {
+    queries <- c(queries, "negative predictive R2 spatial cross validation soil mapping")
+  }
+  if (isTRUE(cmp$rk_worse_than_regression) || isTRUE(cmp$rk_worse_than_ok)) {
+    queries <- c(queries, "regression kriging not improving over ordinary kriging covariates trend residual spatial structure")
+  }
+  if (isTRUE(result$class_evaluation$enabled)) {
+    queries <- c(queries, "soil nutrient class accuracy severe misclassification evaluation")
+  }
+  if (isTRUE(result$uncertainty$available)) {
+    queries <- c(queries, "kriging variance uncertainty map interpretation residual kriging")
+  }
+  unique(queries)
+}
+
+write_rag_context <- function(result, loop_dir, iter_index) {
+  queries <- build_rag_queries(result)
+  evidence_dir <- file.path("knowledge", "notes", "evidence_cards")
+  evidence <- if (dir.exists(evidence_dir)) list.files(evidence_dir, pattern = "\\.json$", recursive = TRUE, full.names = TRUE) else character(0)
+  context <- list(
+    purpose = "Local RAG context hints for an external AI decision. No LLM is called by agent_loop.R.",
+    run_id = result$run_id %||% NA_character_,
+    iteration = iter_index,
+    suggested_queries = queries,
+    evidence_card_files = if (length(evidence) > 0) vapply(evidence, agent_norm_path, character(1)) else character(0),
+    note = "Use run_result.json plus these local-knowledge queries when writing ai_decision.json. Do not quote copyrighted documents into outputs."
+  )
+  out <- file.path(loop_dir, sprintf("rag_context_iter_%03d.json", iter_index))
+  agent_write_json(context, out)
+  out
+}
+
 heuristic_decision <- function(result, request, iter_index, max_more_iterations = 1L) {
   p <- request$parameters %||% list()
   safety <- agent_merge_lists(agent_default_safety_limits(), request$safety_limits %||% list())
   vg <- result$variogram %||% list()
   kr <- result$kriging %||% list()
   warnings_text <- paste(result$warnings %||% character(0), collapse = " ")
+  best_vg <- best_variogram_candidate(result)
+  best_nb <- best_neighbor_candidate(result)
+  base <- baseline_diagnostics(result)
 
   current_range <- as_num(p$MANUAL_RANGE %||% vg$range, 4000)
   current_range_max <- as_num(p$VARIOGRAM_RANGE_MAX, safety$max_range)
@@ -80,36 +237,70 @@ heuristic_decision <- function(result, request, iter_index, max_more_iterations 
   r2 <- as_num(result$metrics$rk_r2_pred)
 
   next_params <- list()
+  reason_bits <- c(paste0("Local heuristic after iteration ", iter_index, ": used run_result diagnostics."))
+  if (!is.null(best_vg)) reason_bits <- c(reason_bits, paste0("Best variogram candidate table suggests ", best_vg$model, " range=", round(best_vg$range), ", nugget/sill=", round(best_vg$nugget_sill_ratio, 3), "."))
+  if (!is.null(best_nb)) reason_bits <- c(reason_bits, paste0("Best neighbor table suggests nmax=", best_nb$nmax, ", radius=", round(best_nb$radius), "."))
+
   range_problem <- isTRUE(vg$range_hit_max) || grepl("range|cutoff|candidate|variogram", warnings_text, ignore.case = TRUE)
-  missing_problem <- grepl("thiếu|missing|neighbor|lân cận|SEARCH_RADIUS", warnings_text, ignore.case = TRUE)
-  noisy_problem <- grepl("nhiễu|đốm|spot", warnings_text, ignore.case = TRUE)
+  missing_problem <- grepl("missing|neighbor|SEARCH_RADIUS|prediction", warnings_text, ignore.case = TRUE)
+  noisy_problem <- grepl("noise|spot|unstable|do[m]?", warnings_text, ignore.case = TRUE)
 
   if (range_problem) {
-    new_range_max <- max(safety$min_range, min(current_range_max * 0.75, safety$max_range))
-    new_range <- max(safety$min_range, min(current_range * 0.85, new_range_max * 0.85))
-    next_params$VARIOGRAM_MODE <- "manual"
-    next_params$VARIOGRAM_MODEL <- if (identical(p$VARIOGRAM_MODEL %||% vg$model %||% "Exp", "Sph")) "Exp" else "Sph"
-    next_params$MANUAL_RANGE <- round(new_range)
-    next_params$VARIOGRAM_RANGE_MAX <- round(new_range_max)
+    if (!is.null(best_vg) && is.finite(best_vg$range) && !isTRUE(best_vg$range_hit_max)) {
+      next_params$VARIOGRAM_MODE <- "manual"
+      next_params$VARIOGRAM_MODEL <- best_vg$model
+      if (is.finite(best_vg$nugget) && best_vg$nugget >= 0) next_params$MANUAL_NUGGET <- best_vg$nugget
+      if (is.finite(best_vg$psill) && best_vg$psill >= 0) next_params$MANUAL_PSILL <- best_vg$psill
+      next_params$MANUAL_RANGE <- round(max(safety$min_range, min(best_vg$range, safety$max_range)))
+      next_params$VARIOGRAM_RANGE_MAX <- round(max(next_params$MANUAL_RANGE * 1.25, min(current_range_max * 0.85, safety$max_range)))
+      reason_bits <- c(reason_bits, "Range/cutoff warning handled with the best available variogram candidate rather than only shrinking range blindly.")
+    } else {
+      new_range_max <- max(safety$min_range, min(current_range_max * 0.75, safety$max_range))
+      new_range <- max(safety$min_range, min(current_range * 0.85, new_range_max * 0.85))
+      next_params$VARIOGRAM_MODE <- "manual"
+      next_params$VARIOGRAM_MODEL <- if (identical(p$VARIOGRAM_MODEL %||% vg$model %||% "Exp", "Sph")) "Exp" else "Sph"
+      next_params$MANUAL_RANGE <- round(new_range)
+      next_params$VARIOGRAM_RANGE_MAX <- round(new_range_max)
+      reason_bits <- c(reason_bits, "Range/cutoff warning handled by constraining range and comparing Sph/Exp.")
+    }
   }
 
   if (is.finite(nug_ratio) && nug_ratio > 0.75) {
-    next_params$VARIOGRAM_MODE <- "manual"
-    next_params$VARIOGRAM_MODEL <- if (identical(p$VARIOGRAM_MODEL %||% vg$model %||% "Exp", "Gau")) "Sph" else "Gau"
+    if (!is.null(best_vg) && is.finite(best_vg$nugget_sill_ratio) && best_vg$nugget_sill_ratio < nug_ratio) {
+      next_params$VARIOGRAM_MODE <- "manual"
+      next_params$VARIOGRAM_MODEL <- best_vg$model
+      next_params$MANUAL_RANGE <- round(max(safety$min_range, min(best_vg$range, safety$max_range)))
+      if (is.finite(best_vg$nugget) && best_vg$nugget >= 0) next_params$MANUAL_NUGGET <- best_vg$nugget
+      if (is.finite(best_vg$psill) && best_vg$psill >= 0) next_params$MANUAL_PSILL <- best_vg$psill
+    } else {
+      next_params$VARIOGRAM_MODE <- "manual"
+      next_params$VARIOGRAM_MODEL <- if (identical(p$VARIOGRAM_MODEL %||% vg$model %||% "Exp", "Gau")) "Sph" else "Gau"
+    }
+    reason_bits <- c(reason_bits, "High nugget/sill may reflect weak spatial structure, outliers, sampling-support mismatch, or laboratory noise; manual data review is still recommended if it persists.")
   }
 
-  if (missing_problem || noisy_problem || (is.finite(r2) && r2 < 0)) {
+  if (missing_problem || noisy_problem || (is.finite(r2) && r2 < 0) || isTRUE(base$rk_worse_than_regression) || isTRUE(base$rk_worse_than_ok)) {
     next_params$AUTO_NEIGHBORS <- TRUE
-    next_params$SEARCH_RADIUS <- round(min(safety$max_range, max(current_radius * 1.15, current_radius + 1000)))
-    next_params$NMAX_NEIGHBORS <- as.integer(min(safety$max_neighbors, max(current_nmax + 4, current_nmax)))
+    if (!is.null(best_nb) && is.finite(best_nb$radius) && is.finite(best_nb$nmax)) {
+      next_params$SEARCH_RADIUS <- round(min(safety$max_range, max(safety$min_range, best_nb$radius)))
+      next_params$NMAX_NEIGHBORS <- as.integer(min(safety$max_neighbors, max(safety$min_neighbors, best_nb$nmax)))
+    } else {
+      next_params$SEARCH_RADIUS <- round(min(safety$max_range, max(current_radius * 1.15, current_radius + 1000)))
+      next_params$NMAX_NEIGHBORS <- as.integer(min(safety$max_neighbors, max(current_nmax + 4, current_nmax)))
+    }
     next_params$CV_METHODS <- c("spatial_kmeans")
+    reason_bits <- c(reason_bits, "RK weakness versus baseline or unstable predictions triggers spatial CV and neighbor retuning.")
+  }
+
+  if (isTRUE(base$rk_worse_than_regression) && isTRUE(base$rk_worse_than_ok) && is.finite(r2) && r2 < 0) {
+    reason_bits <- c(reason_bits, "RK is worse than both regression-only and OK while R2_pred is negative; if this repeats, stop and inspect covariates, trend, samples, and target transform.")
   }
 
   if (length(next_params) == 0) {
     return(list(
       decision = "MANUAL_REVIEW",
       confidence = "medium",
-      reason = "The loop could not infer a safe whitelist-only rerun from diagnostics; manual variogram/map review is required.",
+      reason = paste(c(reason_bits, "The loop could not infer a safe whitelist-only rerun; manual variogram/map review is required."), collapse = " "),
       next_parameters = list(),
       must_keep = list(RUN_CROSS_VALIDATION = TRUE, CV_METHODS = c("spatial_kmeans")),
       stop_condition = list(max_more_iterations = max_more_iterations),
@@ -120,14 +311,13 @@ heuristic_decision <- function(result, request, iter_index, max_more_iterations 
   list(
     decision = "RERUN",
     confidence = "medium",
-    reason = paste0("Conservative local heuristic after iteration ", iter_index, ": adjust only whitelisted variogram/neighborhood parameters and keep spatial CV."),
+    reason = paste(reason_bits, collapse = " "),
     next_parameters = next_params,
     must_keep = list(RUN_CROSS_VALIDATION = TRUE, CV_METHODS = c("spatial_kmeans")),
     stop_condition = list(accept_if_rmse_improves_percent = 5, accept_if_warnings_reduce = TRUE, max_more_iterations = max_more_iterations),
     human_review_required = FALSE
   )
 }
-
 find_external_decision <- function(decisions_dir, target_name, run_id, iter_index) {
   candidates <- c(
     file.path(decisions_dir, sprintf("ai_decision_%s_iter_%03d.json", target_name, iter_index)),
@@ -229,6 +419,8 @@ for (iter in seq_len(max_iterations)) {
   result <- agent_read_json(response_file)
   result$.response_file <- agent_norm_path(response_file)
   result$.loop_result_file <- agent_norm_path(file.path(results_dir, paste0(run_id, "_run_result.json")))
+  rag_context_file <- write_rag_context(result, loop_dir, iter)
+  result$.rag_context_file <- agent_norm_path(rag_context_file)
   agent_write_json(result, file.path(results_dir, paste0(run_id, "_run_result.json")))
   run_results[[length(run_results) + 1L]] <- result
   last_result <- result
@@ -248,10 +440,21 @@ for (iter in seq_len(max_iterations)) {
     human_review_required <- TRUE
   }
 
+  if (is.null(stop_reason) && result_r2_negative_streak(run_results, 2L)) {
+    stop_reason <- "R2_PRED_REMAINS_NEGATIVE"
+    final_decision <- "MANUAL_REVIEW"
+    human_review_required <- TRUE
+  }
+
   if (is.null(stop_reason) && is.finite(previous_rmse) && is.finite(rmse)) {
     improvement <- (previous_rmse - rmse) / max(previous_rmse, 1e-9) * 100
     warnings_reduced <- is.finite(previous_warning_count) && warn_n < previous_warning_count
-    if (improvement < 3 && !warnings_reduced) no_improve_streak <- no_improve_streak + 1L else no_improve_streak <- 0L
+    diag_change <- if (length(run_results) >= 2L) diagnostics_improved(run_results[[length(run_results) - 1L]], result) else list(improved = FALSE, reasons = character(0))
+    if (improvement < 3 && !warnings_reduced && !isTRUE(diag_change$improved)) {
+      no_improve_streak <- no_improve_streak + 1L
+    } else {
+      no_improve_streak <- 0L
+    }
     if (no_improve_streak >= 2L) {
       stop_reason <- "NO_MEANINGFUL_IMPROVEMENT"
       final_decision <- "MANUAL_REVIEW"
@@ -282,6 +485,7 @@ for (iter in seq_len(max_iterations)) {
       iteration = iter,
       run_id = run_id,
       run_result_json = agent_norm_path(response_file),
+      rag_context_json = result$.rag_context_file %||% NULL,
       expected_decision_files = c(
         agent_norm_path(file.path(decisions_dir, sprintf("ai_decision_%s_iter_%03d.json", target_name, iter))),
         agent_norm_path(file.path("agent", "decisions", sprintf("ai_decision_%s_iter_%03d.json", target_name, iter)))

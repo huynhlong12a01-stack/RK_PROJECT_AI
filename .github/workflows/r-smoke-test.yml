@@ -1,0 +1,47 @@
+name: R smoke tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  r-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - name: Install minimal CI packages
+        shell: pwsh
+        run: |
+          Rscript -e "install.packages(c('jsonlite','readr','digest','yaml'), repos='https://cloud.r-project.org')"
+
+      - name: Parse R scripts
+        shell: pwsh
+        run: |
+          Rscript -e "files <- c(list.files('scripts', pattern='\\.R$', full.names=TRUE), 'rk_evaluation/evaluation.R', 'config/evaluation_profiles.R'); files <- files[file.exists(files)]; invisible(lapply(files, parse))"
+
+      - name: Check agent dependency profile
+        shell: pwsh
+        run: |
+          Rscript scripts/check_dependencies.R --profile agent --output agent/responses/dependency_check_ci.json
+
+      - name: Run agent smoke test
+        shell: pwsh
+        run: |
+          Rscript scripts/agent_smoke_test.R
+
+      - name: Run agent loop dry-run
+        shell: pwsh
+        run: |
+          Rscript scripts/agent_loop.R --target pH --max_iterations 1 --dry_run true
+
+      - name: Run RAG metadata smoke test
+        shell: pwsh
+        run: |
+          Rscript scripts/rag_validate_metadata.R agent/responses/rag_smoke_test_ci.json

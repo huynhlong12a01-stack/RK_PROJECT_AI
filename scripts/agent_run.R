@@ -32,6 +32,7 @@ make_failed_result <- function(run_id, target_field, output_folder, status, mess
     output_folder = agent_norm_path(output_folder),
     quality = list(final_grade = NULL, final_score = NULL, decision_hint = "MANUAL_REVIEW_REQUIRED"),
     metrics = list(rk_rmse = NULL, rk_mae = NULL, rk_me = NULL, rk_r2_pred = NULL, nrmse_mean = NULL, rpd = NULL),
+    target_transform = list(requested = NULL, used = NULL, profile = NULL, reason = NULL),
     model_comparison = list(regression_rmse = NULL, ordinary_kriging_rmse = NULL, regression_kriging_rmse = NULL),
     variogram = list(model = NULL, nugget = NULL, psill = NULL, sill = NULL, range = NULL, practical_range = NULL, nugget_sill_ratio = NULL, range_hit_max = NULL),
     warnings = c(message),
@@ -116,6 +117,7 @@ summary_csv <- file.path(report_dir, paste0("summary_", target_name, ".csv"))
 html_report <- file.path(report_dir, paste0("index_", target_name, ".html"))
 interactive_variogram <- file.path(report_dir, "interactive", paste0("variogram_interactive_", target_name, ".html"))
 variogram_diag <- file.path(report_dir, "json", paste0("variogram_diagnostics_", target_name, ".json"))
+variogram_candidate_csv <- file.path(output_folder, "03_variogram", paste0("variogram_candidate_results_", target_name, ".csv"))
 cv_results <- file.path(report_dir, "tables", paste0("cv_results_", target_name, ".csv"))
 neighbor_tuning_csv <- file.path(report_dir, "tables", paste0("neighbor_tuning_", target_name, ".csv"))
 rk_report_csv <- file.path(report_dir, "tables", paste0("rk_report_", target_name, ".csv"))
@@ -145,6 +147,11 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
   if (is.finite(as.numeric(range_max)) && is.finite(as.numeric(vg$range %||% NA_real_))) {
     range_hit_max <- abs(as.numeric(vg$range) - as.numeric(range_max)) / max(1, as.numeric(range_max)) < 0.02
   }
+  optional_missing <- character(0)
+  if (!file.exists(variogram_diag)) optional_missing <- c(optional_missing, paste0(agent_norm_path(variogram_diag), " not available"))
+  if (!file.exists(variogram_candidate_csv)) optional_missing <- c(optional_missing, paste0(agent_norm_path(variogram_candidate_csv), " not available; no valid constrained variogram candidates may have been found"))
+  if (!file.exists(neighbor_tuning_csv)) optional_missing <- c(optional_missing, paste0(agent_norm_path(neighbor_tuning_csv), " not available; AUTO_NEIGHBORS may be disabled or no neighbor candidate table was produced"))
+
   result <- list(
     run_id = run_id,
     requested_run_id = requested_run_id,
@@ -160,6 +167,7 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
       nrmse_mean = cv$NRMSE_mean %||% NULL,
       rpd = cv$RPD %||% NULL
     ),
+    target_transform = evaluation$target_transform %||% list(),
     model_comparison = list(
       regression_rmse = agent_pick_model_metric(model_comparison, "Regression-only", "RMSE"),
       ordinary_kriging_rmse = agent_pick_model_metric(model_comparison, "Ordinary Kriging", "RMSE"),
@@ -208,13 +216,14 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
       model_comparison_csv = agent_norm_path(model_csv),
       cv_results_csv = agent_norm_path(cv_results),
       neighbor_tuning_csv = agent_norm_path(neighbor_tuning_csv),
+      variogram_candidate_csv = agent_norm_path(variogram_candidate_csv),
       rk_report_csv = agent_norm_path(rk_report_csv),
       variogram_diagnostics_json = agent_norm_path(variogram_diag),
       interactive_variogram = agent_norm_path(interactive_variogram),
       run_log = agent_norm_path(engine_log),
       agent_log = agent_norm_path(log_file)
     ),
-    missing_outputs = if (length(missing) == 0) list() else unique(missing)
+    missing_outputs = if (length(c(missing, optional_missing)) == 0) list() else unique(c(missing, optional_missing))
   )
   result$quality$decision_hint <- agent_decision_hint(result)
 }

@@ -134,7 +134,7 @@ agent_validate_parameter <- function(name, value, safety_limits = list()) {
   if (name == "CV_K_FOLDS" && (!int1(value) || value < 2 || value > 20)) err <- "CV_K_FOLDS must be an integer from 2 to 20."
   if (name == "CV_METHODS" && (!all(val_vec %in% c("random", "spatial_kmeans")) || length(val_vec) == 0)) err <- "CV_METHODS must contain random and/or spatial_kmeans."
   if (name == "CLAMP_TO_SAMPLE_RANGE" && (!is.logical(value) || length(value) != 1)) err <- "CLAMP_TO_SAMPLE_RANGE must be true or false."
-  if (name == "TARGET_TRANSFORM") err <- "TARGET_TRANSFORM is whitelisted for future use but this project does not implement transforms yet."
+  if (name == "TARGET_TRANSFORM" && !(value %in% c("auto", "none", "log1p"))) err <- "TARGET_TRANSFORM must be auto, none, or log1p."
   err
 }
 

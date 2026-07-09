@@ -23,7 +23,8 @@
     "SEARCH_RADIUS": 12000,
     "CV_METHODS": ["random", "spatial_kmeans"],
     "CV_K_FOLDS": 5,
-    "CLAMP_TO_SAMPLE_RANGE": true
+    "CLAMP_TO_SAMPLE_RANGE": true,
+    "TARGET_TRANSFORM": "auto"
   },
   "safety_limits": {
     "max_iterations": 5,

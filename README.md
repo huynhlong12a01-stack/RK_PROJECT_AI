@@ -1,6 +1,6 @@
 # Regression Kriging R Project
 
-Dự án này chạy nội suy Regression Kriging cho dữ liệu đất bằng R, Rscript và PowerShell. Luồng hiện tại giữ engine R làm lõi, có evaluation rules, report HTML/CSV/JSON, agent-ready workflow, batch runner nhiều chỉ tiêu, auto-neighbor tuning và kho tri thức RAG cục bộ.
+Dự án này chạy nội suy Regression Kriging cho dữ liệu đất bằng R, Rscript và PowerShell. Luồng hiện tại giữ R engine làm lõi, có evaluation rules, report HTML/CSV/JSON, agent-ready workflow, batch runner nhiều chỉ tiêu, auto-neighbor tuning, transform chỉ tiêu và kho tri thức RAG cục bộ.
 
 ## Yêu cầu phần mềm
 
@@ -19,19 +19,22 @@ Dự án dùng dependency chính thức trong `DESCRIPTION` và `scripts/depende
 Nếu thiếu package và bạn cho phép cài đặt:
 
 ```powershell
-.\install_dependencies.ps1 -Profile "core,rag"
+.\install_dependencies.ps1 -Profile "core,agent"
+.\install_dependencies.ps1 -Profile "tidy_io,rag"
 .\install_dependencies.ps1 -Profile "geostat_extra,spatial_cv,modeling"
 ```
 
 Các profile:
 
 - `core`: `sf`, `terra`, `gstat`, `sp`, `jsonlite`, `digest`, `yaml`.
-- `rag`: `pdftools`, `readr`, `dplyr`, `purrr`, `stringr`, `tibble`.
+- `agent`: bộ tối thiểu cho file-based agent workflow: `jsonlite`, `readr`, `digest`, `yaml`.
+- `tidy_io`: tiện ích đọc/ghi và xử lý bảng: `readr`, `dplyr`, `purrr`, `stringr`, `tibble`, `rlang`.
+- `rag`: đọc/chunk tài liệu RAG local: `pdftools`, `digest`, `jsonlite`, `stringr`, `tibble`, `dplyr`, `purrr`, `readr`.
 - `geostat_extra`: `automap`.
 - `spatial_cv`: `blockCV`, `CAST`, `rsample`.
 - `modeling`: `mgcv`, `ranger`, `randomForest`, `xgboost`, `caret`.
 
-Lưu ý: các package ML đã sẵn sàng để mở rộng, nhưng engine hiện vẫn dùng trend mặc định bằng hồi quy tuyến tính để giữ đúng bản chất RK và tránh đổi thuật toán khi chưa có kiểm định đầy đủ.
+Lưu ý: agent workflow cần `core + agent`; các phần batch/compare dùng bảng CSV nên cũng hưởng lợi từ `tidy_io`. Các package ML đã sẵn sàng để mở rộng, nhưng engine mặc định vẫn dùng hồi quy tuyến tính để giữ đúng luồng Regression Kriging đã kiểm soát.
 
 ## Chuẩn bị input
 
@@ -52,7 +55,7 @@ Kiểm tra raster covariates, CRS, độ phân giải, extent và overlap với 
 .\validate_raster_schema.ps1
 ```
 
-Tạo template CSV/Excel:
+Tạo template CSV/Excel để tránh sai tên cột chỉ tiêu:
 
 ```powershell
 .\create_input_templates.ps1
@@ -72,6 +75,22 @@ Rscript scripts\main.R
 
 Config chính nằm ở `scripts/00_config.R`.
 
+## Transform chỉ tiêu
+
+Config có:
+
+```r
+TARGET_TRANSFORM <- "auto"
+```
+
+Giá trị hợp lệ:
+
+- `auto`: dùng evaluation profile để quyết định, ví dụ P, B, Zn, Cu, Fe, EC có thể dùng `log1p` nếu phân phối lệch phải.
+- `none`: fit trực tiếp trên đơn vị gốc.
+- `log1p`: fit regression/variogram trên thang `log1p`, sau đó back-transform prediction về đơn vị gốc.
+
+CV metric, bảng so sánh model và report được tính trên đơn vị gốc. Report sẽ ghi `target_transform_requested` và `target_transform_used`. Nếu dữ liệu có giá trị âm, engine sẽ không dùng `log1p` và ghi cảnh báo.
+
 ## Chạy agent-ready một chỉ tiêu
 
 ```powershell
@@ -88,9 +107,9 @@ output/agent_runs/<run_id>/
 
 ## Chạy agent loop có kiểm soát
 
-Workflow loop không gọi LLM thật. Nó chạy iteration, đọc `run_result.json`, validate `ai_decision.json` nếu có, tạo request kế tiếp và dừng theo giới hạn khoa học.
+Workflow loop không gọi LLM thật. Nó chạy iteration, đọc `run_result.json`, tạo RAG context gợi ý cho agent ngoài, validate `ai_decision.json` nếu có, tạo request kế tiếp và dừng theo giới hạn khoa học.
 
-Chạy dry-run để kiểm tra request/log:
+Dry-run kiểm tra request/log:
 
 ```powershell
 .\run_agent_loop.ps1 -Target pH -MaxIterations 3 -DryRun
@@ -102,7 +121,7 @@ Chạy thật và chờ quyết định AI bên ngoài trước khi rerun:
 .\run_agent_loop.ps1 -Target pH -MaxIterations 3
 ```
 
-Chạy thật với heuristic nội bộ bảo thủ, chỉ đổi tham số trong whitelist và vẫn qua validator:
+Chạy thật với heuristic nội bộ bảo thủ, vẫn qua validator:
 
 ```powershell
 .\run_agent_loop.ps1 -Target pH -MaxIterations 3 -AutoDecision
@@ -112,6 +131,7 @@ Output loop nằm trong:
 
 ```text
 agent/history/<loop_id>/
+agent/history/<loop_id>/rag_context_iter_001.json
 agent/responses/final_decision_<target>_<loop_id>.json
 ```
 
@@ -135,9 +155,11 @@ Dry-run kỹ thuật:
 .\run_agent_batch.ps1 -Targets pH -DryRun
 ```
 
+Mỗi chỉ tiêu được match với evaluation profile riêng trong `config/evaluation_profiles.R`; nếu chưa có profile riêng, report sẽ cảnh báo đang dùng profile tổng quát.
+
 ## Auto-neighbor tuning
 
-Mặc định `AUTO_NEIGHBORS <- TRUE`. Engine thử các tổ hợp:
+Mặc định `AUTO_NEIGHBORS <- TRUE`. Engine thử các tổ hợp trong config:
 
 ```r
 AUTO_NEIGHBOR_NMAX_CANDIDATES <- c(8, 12, 16, 20, 24, 32)
@@ -156,7 +178,7 @@ Người dùng thường không cần tự chỉnh `NMAX_NEIGHBORS` và `SEARCH_
 
 Trong mỗi run folder:
 
-- `05_final_rk/`: GeoTIFF RK và uncertainty STD.
+- `05_final_rk/`: GeoTIFF RK và residual kriging uncertainty STD.
 - `06_report/index_<target>.html`: report chính.
 - `06_report/interactive/`: variogram tương tác.
 - `06_report/tables/`: bảng CSV kỹ thuật.
@@ -190,7 +212,7 @@ Compare không chọn mô hình chỉ vì RMSE thấp nhất; nó cân bằng RM
 .\run_rag_query.ps1 -Query "spatial cross-validation variogram range" -TopK 8
 ```
 
-RAG local không tải tài liệu bản quyền, không gửi tài liệu ra ngoài và không commit PDF/chunks vào Git.
+RAG local không tải tài liệu bản quyền, không gửi tài liệu ra ngoài và không commit PDF/chunks vào Git. Agent loop hiện tạo `rag_context_iter_*.json` với các câu truy vấn gợi ý dựa trên cảnh báo của từng iteration.
 
 ## Smoke test
 

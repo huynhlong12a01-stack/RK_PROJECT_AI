@@ -5,7 +5,7 @@
 source("scripts/dependencies.R")
 
 parse_args <- function(args) {
-  out <- list(profile = "core,rag", repos = "https://cloud.r-project.org")
+  out <- list(profile = "core,agent", repos = "https://cloud.r-project.org")
   i <- 1L
   while (i <= length(args)) {
     key <- args[[i]]
