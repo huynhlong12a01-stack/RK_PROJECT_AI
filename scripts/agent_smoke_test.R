@@ -61,7 +61,24 @@ status <- suppressWarnings(system2(Sys.which("Rscript"), c("scripts/agent_valida
 invalid_transform_validated <- agent_read_json(invalid_transform_out)
 if (isTRUE(invalid_transform_validated$valid) || !("TARGET_TRANSFORM" %in% names(invalid_transform_validated$rejected_parameters))) fail("invalid TARGET_TRANSFORM was not rejected")
 ok("validated TARGET_TRANSFORM parameter")
-# 6. Test compare two fake run_result.json files.
+
+# 6. Test LOG_BACKTRANSFORM_BIAS_CORRECTION is accepted only as boolean.
+bias_decision <- list(decision = "RERUN", confidence = "medium", reason = "test log bias correction", next_parameters = list(LOG_BACKTRANSFORM_BIAS_CORRECTION = TRUE), must_keep = list(RUN_CROSS_VALIDATION = TRUE), human_review_required = FALSE)
+bias_file <- file.path(bad_dir, "bias_correction_decision.json")
+bias_out <- file.path(bad_dir, "bias_correction_validated.json")
+agent_write_json(bias_decision, bias_file)
+status <- system2(Sys.which("Rscript"), c("scripts/agent_validate_decision.R", "--decision", bias_file, "--request", "agent/requests/run_request_template.json", "--output", bias_out), stdout = TRUE, stderr = TRUE)
+bias_validated <- agent_read_json(bias_out)
+if (!isTRUE(bias_validated$valid) || !isTRUE(bias_validated$accepted_parameters$LOG_BACKTRANSFORM_BIAS_CORRECTION)) fail("valid LOG_BACKTRANSFORM_BIAS_CORRECTION was not accepted")
+invalid_bias <- list(decision = "RERUN", confidence = "medium", reason = "test log bias correction", next_parameters = list(LOG_BACKTRANSFORM_BIAS_CORRECTION = "yes"), must_keep = list(RUN_CROSS_VALIDATION = TRUE), human_review_required = FALSE)
+invalid_bias_file <- file.path(bad_dir, "invalid_bias_correction_decision.json")
+invalid_bias_out <- file.path(bad_dir, "invalid_bias_correction_validated.json")
+agent_write_json(invalid_bias, invalid_bias_file)
+status <- suppressWarnings(system2(Sys.which("Rscript"), c("scripts/agent_validate_decision.R", "--decision", invalid_bias_file, "--request", "agent/requests/run_request_template.json", "--output", invalid_bias_out), stdout = TRUE, stderr = TRUE))
+invalid_bias_validated <- agent_read_json(invalid_bias_out)
+if (isTRUE(invalid_bias_validated$valid) || !("LOG_BACKTRANSFORM_BIAS_CORRECTION" %in% names(invalid_bias_validated$rejected_parameters))) fail("invalid LOG_BACKTRANSFORM_BIAS_CORRECTION was not rejected")
+ok("validated LOG_BACKTRANSFORM_BIAS_CORRECTION parameter")
+# 7. Test compare two fake run_result.json files.
 fake_dir <- file.path(bad_dir, "fake_results")
 agent_ensure_dir(fake_dir)
 fake_low_rmse_bad <- list(run_id = "fake_low_rmse_bad", target_field = "pH", status = "completed", quality = list(final_grade = "B", final_score = 75), metrics = list(rk_rmse = 0.30, rk_mae = 0.20, rk_me = 0.15, rk_r2_pred = -0.10, nrmse_mean = 0.05, rpd = 1.7), model_comparison = list(regression_rmse = 0.31, ordinary_kriging_rmse = 0.29, regression_kriging_rmse = 0.30), variogram = list(nugget_sill_ratio = 0.90, range = 8000, range_hit_max = TRUE), warnings = c("Range hits maximum", "R2 negative"), files = list())
@@ -75,7 +92,7 @@ comparison <- agent_read_json(compare_out)
 if (!identical(comparison$selected_run_id, "fake_good")) fail("compare runs selected lowest RMSE despite bad diagnostics")
 ok("compared fake runs without choosing lowest RMSE blindly")
 
-# 7. Test compare penalizes poor class accuracy and high uncertainty.
+# 8. Test compare penalizes poor class accuracy and high uncertainty.
 fake_class_dir <- file.path(bad_dir, "fake_class_uncertainty_results")
 agent_ensure_dir(fake_class_dir)
 fake_low_rmse_class_bad <- list(
@@ -106,7 +123,7 @@ if (!file.exists(class_compare_out)) fail("compare runs did not produce class/un
 class_comparison <- agent_read_json(class_compare_out)
 if (!identical(class_comparison$selected_run_id, "fake_higher_rmse_class_good")) fail("compare runs ignored class accuracy/uncertainty penalties")
 ok("compared fake runs with class accuracy and uncertainty penalties")
-# 8. Test README command examples are syntactically plausible.
+# 9. Test README command examples are syntactically plausible.
 if (!file.exists("README.md") || !file.exists("AGENT_README.md")) fail("README files are missing")
 readme <- paste(readLines("README.md", warn = FALSE), collapse = "\n")
 agent_readme <- paste(readLines("AGENT_README.md", warn = FALSE), collapse = "\n")

@@ -89,7 +89,15 @@ Giá trị hợp lệ:
 - `none`: fit trực tiếp trên đơn vị gốc.
 - `log1p`: fit regression/variogram trên thang `log1p`, sau đó back-transform prediction về đơn vị gốc.
 
-CV metric, bảng so sánh model và report được tính trên đơn vị gốc. Report sẽ ghi `target_transform_requested` và `target_transform_used`. Nếu dữ liệu có giá trị âm, engine sẽ không dùng `log1p` và ghi cảnh báo.
+CV metric, bảng so sánh model và report được tính trên đơn vị gốc. Nếu transform = `log1p`, Regression-only, OK và RK đều được back-transform trước khi tính metric; OK baseline cũng fit trên `log1p(target)` để so sánh công bằng. Report sẽ ghi `target_transform_requested`, `target_transform_used`, `metric_scale` và `ok_baseline_scale`. Nếu profile yêu cầu giá trị không âm và dữ liệu có giá trị âm, engine sẽ không dùng `log1p` và ghi cảnh báo.
+
+Có thêm tùy chọn:
+
+```r
+LOG_BACKTRANSFORM_BIAS_CORRECTION <- FALSE
+```
+
+Khi bật `TRUE`, OK/RK mean trên thang `log1p` sẽ back-transform theo xấp xỉ `exp(mu + 0.5*sigma^2) - 1` nếu có variance trên model scale. Mặc định tắt để không làm thay đổi mạnh kết quả cũ; nên cân nhắc bật cho P, B, Zn, Cu, Fe, EC khi dùng `log1p`.
 
 ## Chạy agent-ready một chỉ tiêu
 
@@ -181,6 +189,8 @@ Trong mỗi run folder:
 - `05_final_rk/`: GeoTIFF RK và residual kriging uncertainty STD.
 - `06_report/index_<target>.html`: report chính.
 - `06_report/interactive/`: variogram tương tác.
+- `02_regression_model/residual_histogram_<target>.png`: residual trên model scale dùng cho variogram.
+- `02_regression_model/residual_original_histogram_<target>.png`: residual trên đơn vị gốc.
 - `06_report/tables/`: bảng CSV kỹ thuật.
 - `06_report/json/`: JSON evaluation.
 - `06_report/logs/`: log chạy.
@@ -212,7 +222,7 @@ Compare không chọn mô hình chỉ vì RMSE thấp nhất; nó cân bằng RM
 .\run_rag_query.ps1 -Query "spatial cross-validation variogram range" -TopK 8
 ```
 
-RAG local không tải tài liệu bản quyền, không gửi tài liệu ra ngoài và không commit PDF/chunks vào Git. Agent loop hiện tạo `rag_context_iter_*.json` với các câu truy vấn gợi ý dựa trên cảnh báo của từng iteration.
+RAG local không tải tài liệu bản quyền, không gửi tài liệu ra ngoài và không commit PDF/chunks vào Git. Agent loop hiện tạo `rag_context_iter_*.json` và `decision_packet_iter_*.md` với các câu truy vấn gợi ý, evidence card summaries, run diagnostics và prompt paths để Codex/AI bên ngoài viết `ai_decision.json`.
 
 ## Smoke test
 
@@ -229,3 +239,7 @@ RAG local không tải tài liệu bản quyền, không gửi tài liệu ra ng
 - Thiếu input CSV/raster: kiểm tra `POINT_FILE`, `RASTER_DIR`, `RASTER_PATTERN` trong `scripts/00_config.R`.
 - Variogram cảnh báo range/nugget: mở `06_report/interactive/variogram_interactive_<target>.html` để xem thủ công.
 - R²_pred âm với dữ liệu random/test: không cố chứng minh RK tốt; chỉ dùng kết quả để kiểm tra workflow.
+
+## CI trên GitHub
+
+Workflow `.github/workflows/r-smoke-test.yml` chạy smoke test nhẹ trên mỗi push/PR. Ngoài ra có `workflow_dispatch` thủ công với input `run_geospatial_smoke=true` để cài `sf`, `terra`, `gstat`, `sp` và chạy raster preflight nếu dữ liệu raster có trong môi trường CI.

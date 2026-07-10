@@ -1,8 +1,14 @@
 name: R smoke tests
 
-on:
+"on":
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_geospatial_smoke:
+        description: "Install geospatial packages and run raster preflight on available data"
+        required: false
+        default: "false"
 
 jobs:
   r-smoke:
@@ -31,6 +37,11 @@ jobs:
         run: |
           Rscript scripts/check_dependencies.R --profile agent --output agent/responses/dependency_check_ci.json
 
+      - name: Run transform smoke test
+        shell: pwsh
+        run: |
+          Rscript scripts/transform_smoke_test.R
+
       - name: Run agent smoke test
         shell: pwsh
         run: |
@@ -45,3 +56,34 @@ jobs:
         shell: pwsh
         run: |
           Rscript scripts/rag_validate_metadata.R agent/responses/rag_smoke_test_ci.json
+
+  geospatial-smoke:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_geospatial_smoke == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+
+      - name: Install geospatial packages
+        shell: pwsh
+        run: |
+          Rscript -e "install.packages(c('jsonlite','readr','digest','yaml','sf','terra','gstat','sp'), repos='https://cloud.r-project.org')"
+
+      - name: Check core dependency profile
+        shell: pwsh
+        run: |
+          Rscript scripts/check_dependencies.R --profile core --output agent/responses/dependency_check_core_ci.json
+
+      - name: Run raster preflight if data is present
+        shell: pwsh
+        run: |
+          if (Test-Path input/raster) {
+            Rscript scripts/validate_raster_schema.R --output agent/responses/raster_schema_check_ci.json
+          } else {
+            Write-Host "input/raster is not present in CI checkout; geospatial package install and core dependency check completed."
+          }

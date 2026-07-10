@@ -20,6 +20,7 @@ indicator_rows <- lapply(names(profiles), function(nm) {
     unit = p$unit %||% "",
     aliases = paste(p$aliases %||% character(0), collapse = "; "),
     default_transform = p$default_transform %||% "",
+    transform_requires_nonnegative = isTRUE(p$transform_requires_nonnegative %||% FALSE),
     has_class_bins = isTRUE(p$class_bins$enabled),
     stringsAsFactors = FALSE
   )

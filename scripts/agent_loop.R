@@ -219,6 +219,84 @@ write_rag_context <- function(result, loop_dir, iter_index) {
   out
 }
 
+summarize_evidence_cards <- function(files, max_cards = 12L) {
+  files <- files[file.exists(files)]
+  if (length(files) == 0) return(character(0))
+  files <- head(files, max_cards)
+  vapply(files, function(f) {
+    card <- try(agent_read_json(f), silent = TRUE)
+    if (inherits(card, "try-error")) return(paste0("- ", agent_norm_path(f), ": cannot read."))
+    paste0(
+      "- ", card$claim_id %||% basename(f), " [", card$strength %||% "unknown", "]: ",
+      card$claim %||% "", " Recommended: ", card$recommended_action %||% "",
+      " Source file: ", agent_norm_path(f)
+    )
+  }, character(1))
+}
+
+write_decision_packet <- function(result, request, rag_context_file, loop_dir, iter_index) {
+  rag <- if (file.exists(rag_context_file)) agent_read_json(rag_context_file) else list()
+  evidence_files <- vapply(rag$evidence_card_files %||% character(0), function(p) gsub("/", .Platform$file.sep, p, fixed = TRUE), character(1))
+  evidence_summary <- summarize_evidence_cards(evidence_files)
+  diagnostics <- list(
+    run_id = result$run_id %||% NA_character_,
+    target_field = result$target_field %||% NA_character_,
+    status = result$status %||% NA_character_,
+    target_transform = result$target_transform %||% list(),
+    metrics = result$metrics %||% list(),
+    model_comparison = result$model_comparison %||% list(),
+    variogram = result$variogram %||% list(),
+    class_evaluation = result$class_evaluation %||% list(),
+    uncertainty = result$uncertainty %||% list(),
+    warnings = result$warnings %||% character(0),
+    recommendations = result$recommendations %||% character(0),
+    files = result$files %||% list()
+  )
+  out <- file.path(loop_dir, sprintf("decision_packet_iter_%03d.md", iter_index))
+  lines <- c(
+    paste0("# Decision Packet Iteration ", sprintf("%03d", iter_index)),
+    "",
+    "This packet is generated for an external Codex/AI decision. No LLM/API is called by the R workflow.",
+    "",
+    "## Required Inputs",
+    "",
+    paste0("- Run result JSON: `", result$.response_file %||% "", "`"),
+    paste0("- RAG context JSON: `", agent_norm_path(rag_context_file), "`"),
+    "- Decision prompt template: `agent/prompts/decision_prompt_template.md`",
+    "- System prompt: `agent/prompts/system_prompt.md`",
+    "",
+    "## Key Diagnostics JSON",
+    "",
+    "```json",
+    as.character(agent_to_json(diagnostics, pretty = TRUE)),
+    "```",
+    "",
+    "## Suggested Local RAG Queries",
+    "",
+    if (length(rag$suggested_queries %||% character(0)) > 0) paste0("- ", unlist(rag$suggested_queries, use.names = FALSE)) else "- No suggested queries.",
+    "",
+    "## Evidence Card Summaries",
+    "",
+    if (length(evidence_summary) > 0) evidence_summary else "- No evidence cards available.",
+    "",
+    "## Whitelist Parameters",
+    "",
+    paste0("`", agent_allowed_parameters(), "`"),
+    "",
+    "## Safety Limits",
+    "",
+    "```json",
+    as.character(agent_to_json(agent_merge_lists(agent_default_safety_limits(), request$safety_limits %||% list()), pretty = TRUE)),
+    "```",
+    "",
+    "## Output Needed",
+    "",
+    "Write `ai_decision_<target>_iter_<NNN>.json` with decision ACCEPT, RERUN, MANUAL_REVIEW, or REJECT. Validate it before rerunning."
+  )
+  writeLines(lines, out, useBytes = TRUE)
+  out
+}
+
 heuristic_decision <- function(result, request, iter_index, max_more_iterations = 1L) {
   p <- request$parameters %||% list()
   safety <- agent_merge_lists(agent_default_safety_limits(), request$safety_limits %||% list())
@@ -421,6 +499,8 @@ for (iter in seq_len(max_iterations)) {
   result$.loop_result_file <- agent_norm_path(file.path(results_dir, paste0(run_id, "_run_result.json")))
   rag_context_file <- write_rag_context(result, loop_dir, iter)
   result$.rag_context_file <- agent_norm_path(rag_context_file)
+  decision_packet_file <- write_decision_packet(result, req, rag_context_file, loop_dir, iter)
+  result$.decision_packet_file <- agent_norm_path(decision_packet_file)
   agent_write_json(result, file.path(results_dir, paste0(run_id, "_run_result.json")))
   run_results[[length(run_results) + 1L]] <- result
   last_result <- result
@@ -486,6 +566,7 @@ for (iter in seq_len(max_iterations)) {
       run_id = run_id,
       run_result_json = agent_norm_path(response_file),
       rag_context_json = result$.rag_context_file %||% NULL,
+      decision_packet_md = result$.decision_packet_file %||% NULL,
       expected_decision_files = c(
         agent_norm_path(file.path(decisions_dir, sprintf("ai_decision_%s_iter_%03d.json", target_name, iter))),
         agent_norm_path(file.path("agent", "decisions", sprintf("ai_decision_%s_iter_%03d.json", target_name, iter)))

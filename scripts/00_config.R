@@ -91,6 +91,8 @@ AUTO_NEIGHBOR_MAX_CANDIDATES <- 50
 CLAMP_TO_SAMPLE_RANGE <- TRUE
 # "auto" uses the evaluation profile/recommendation; options: "auto", "none", "log1p".
 TARGET_TRANSFORM <- "auto"
+# If TRUE and TARGET_TRANSFORM resolves to log1p, OK/RK back-transform means use exp(mu + 0.5*sigma^2) - 1 when model-scale variance is available.
+LOG_BACKTRANSFORM_BIAS_CORRECTION <- FALSE
 # ============================================================
 # Scientific validation and model comparison
 # ============================================================

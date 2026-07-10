@@ -22,9 +22,14 @@ rk_eval_default_profiles <- function() {
   common_weights <- list(data_quality = 15, regression_trend = 15, residual_variogram = 25, cross_validation = 30, uncertainty = 10, class_evaluation = 5)
   class_weights <- list(data_quality = 15, regression_trend = 10, residual_variogram = 20, cross_validation = 25, uncertainty = 10, class_evaluation = 20)
   vgm <- list(nugget_sill_good_max = 0.50, nugget_sill_acceptable_max = 0.75, range_min_factor_of_mean_nn = 2.0, range_max_fraction_of_extent = 0.70, warn_if_range_hits_max = TRUE)
-  base <- function(display_name, unit, aliases, transform, valid, soft, bins = NULL, weights = common_weights, focus = "balanced") {
+  base <- function(display_name, unit, aliases, transform, valid, soft, bins = NULL, weights = common_weights, focus = "balanced", transform_requires_nonnegative = NULL) {
+    if (is.null(transform_requires_nonnegative)) {
+      vmin <- suppressWarnings(as.numeric(valid$min %||% NA_real_))
+      transform_requires_nonnegative <- is.finite(vmin) && vmin >= 0
+    }
     list(display_name = display_name, unit = unit, aliases = aliases, default_transform = transform,
-      transform_candidates = unique(c(transform, "none", "log1p")), valid_range = valid, soft_warning_range = soft,
+      transform_candidates = unique(c(transform, "none", "log1p")), transform_requires_nonnegative = transform_requires_nonnegative,
+      valid_range = valid, soft_warning_range = soft,
       evaluation_focus = focus, nrmse_mean_thresholds = list(excellent = 0.15, good = 0.25, acceptable = 0.40),
       rmse_thresholds = list(excellent = NA_real_, good = NA_real_, acceptable = NA_real_),
       bias_threshold = list(good_abs_me = 0.10, acceptable_abs_me = 0.20),
@@ -249,7 +254,15 @@ rk_eval_cross_validation <- function(observed, predicted_rk, profile, predicted_
   list(metrics = m, method = method, cv_folds = cv_folds, refit_variogram = refit_variogram, leakage_guard = isTRUE(refit_variogram), warnings = unique(warnings))
 }
 
-rk_eval_uncertainty <- function(sd_values) {
+rk_eval_uncertainty <- function(sd_values = NULL, summary = NULL) {
+  if (!is.null(summary) && isTRUE(summary$available)) {
+    warnings <- summary$warnings %||% character(0)
+    high_pct <- suppressWarnings(as.numeric(summary$high_uncertainty_area_percent %||% NA_real_))
+    if (is.finite(high_pct) && high_pct > 30) warnings <- c(warnings, "Tỷ lệ diện tích uncertainty cao lớn; nên bổ sung mẫu.")
+    summary$warnings <- unique(warnings)
+    return(summary)
+  }
+
   x <- as.numeric(sd_values)
   x <- x[is.finite(x)]
   if (length(x) == 0) return(list(available = FALSE, warnings = "Không có uncertainty raster để đánh giá."))
@@ -386,7 +399,7 @@ rk_eval_write_html <- function(result, path) {
     paste0("<p><b>Kết luận:</b> ", rk_eval_html_escape(result$summary), "</p>"),
     "<section><h2>1. Mở file nào?</h2><p>Đây là report chính. Nếu cần chỉnh variogram, mở liên kết variogram tương tác bên dưới.</p><ul>", link_html, "</ul></section>",
     "<section><h2>2. Tổng quan kết quả</h2><table>",
-    rk_eval_rows(list(target = result$target_field, unit = result$unit, profile = result$profile_name, n_valid = result$data_quality$n_valid, transform_used = result$target_transform$used %||% "none", transform_recommendation = result$transform_recommendation$transform, variogram_model = result$variogram$model, range_m = result$variogram$range, nugget_sill = result$variogram$nugget_sill_ratio, RK_RMSE = result$cross_validation$metrics$RMSE, RK_MAE = result$cross_validation$metrics$MAE, RK_ME = result$cross_validation$metrics$ME, RK_R2_pred = result$cross_validation$metrics$R2_pred)),
+    rk_eval_rows(list(target = result$target_field, unit = result$unit, profile = result$profile_name, n_valid = result$data_quality$n_valid, transform_used = result$target_transform$used %||% "none", transform_bias_correction = result$target_transform$log_backtransform_bias_correction %||% FALSE, metric_scale = result$target_transform$metric_scale %||% "original units", ok_baseline_scale = result$target_transform$ok_baseline_scale %||% "original units", transform_recommendation = result$transform_recommendation$transform, variogram_model = result$variogram$model, range_m = result$variogram$range, nugget_sill = result$variogram$nugget_sill_ratio, RK_RMSE = result$cross_validation$metrics$RMSE, RK_MAE = result$cross_validation$metrics$MAE, RK_ME = result$cross_validation$metrics$ME, RK_R2_pred = result$cross_validation$metrics$R2_pred)),
     "</table></section>",
     "<div class='grid'><section><h2>3. Chất lượng dữ liệu đầu vào</h2><table>", rk_eval_rows(result$data_quality[setdiff(names(result$data_quality), "warnings")]), "</table></section>",
     "<section><h2>4. Regression trend</h2><table>", rk_eval_rows(result$regression$metrics), "</table></section></div>",
@@ -453,6 +466,9 @@ rk_eval_summary_table <- function(result) {
     unit = result$unit,
     profile = result$profile_name,
     transform_used = result$target_transform$used %||% "none",
+    transform_bias_correction = result$target_transform$log_backtransform_bias_correction %||% FALSE,
+    metric_scale = result$target_transform$metric_scale %||% "original units",
+    ok_baseline_scale = result$target_transform$ok_baseline_scale %||% "original units",
     final_score = result$quality$final_score,
     final_grade = result$quality$final_grade,
     n_valid = result$data_quality$n_valid,
@@ -487,7 +503,7 @@ run_rk_quality_evaluation <- function(context) {
   vg <- rk_eval_variogram(context$variogram_params, context$experimental_variogram, context$coordinates, profile, context$range_max %||% NA_real_)
   cv <- rk_eval_cross_validation(context$cv_observed, context$cv_rk_predicted, profile, context$cv_regression_predicted, context$cv_ok_predicted, context$cv_method %||% NA_character_, context$cv_folds %||% NA_integer_, context$cv_refit_variogram %||% NA)
   cls <- rk_eval_class_prediction(context$cv_observed, context$cv_rk_predicted, profile)
-  unc <- rk_eval_uncertainty(context$prediction_sd_values)
+  unc <- rk_eval_uncertainty(context$prediction_sd_values, context$prediction_sd_summary %||% NULL)
 
   all_warnings <- unique(c(warnings, dq$warnings, tr$reason, reg$warnings, vg$warnings, cv$warnings, cls$warnings, unc$warnings))
   result <- list(
@@ -495,7 +511,7 @@ run_rk_quality_evaluation <- function(context) {
     display_name = profile$display_name %||% context$target_field,
     unit = profile$unit %||% "",
     profile_name = profile$profile_name,
-    target_transform = context$target_transform %||% list(requested = "auto", used = "none", profile = profile$profile_name, reason = ""),
+    target_transform = context$target_transform %||% list(requested = "auto", used = "none", profile = profile$profile_name, reason = "", requires_nonnegative = FALSE, log_backtransform_bias_correction = FALSE, metric_scale = "original units", ok_baseline_scale = "original units"),
     transform_recommendation = tr,
     data_quality = dq,
     regression = reg,

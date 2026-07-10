@@ -89,6 +89,7 @@ Normal RK:
 agent/responses/<run_id>_run_result.json
 agent/responses/final_decision_<target>_<loop_id>.json
 agent/history/<loop_id>/rag_context_iter_001.json
+agent/history/<loop_id>/decision_packet_iter_001.md
 output/agent_runs/<run_id>/06_report/json/evaluation_<target>.json
 output/agent_runs/<run_id>/06_report/tables/model_comparison_<target>.csv
 output/agent_runs/<run_id>/06_report/tables/cv_results_<target>.csv
@@ -137,9 +138,10 @@ CV_METHODS
 CV_K_FOLDS
 CLAMP_TO_SAMPLE_RANGE
 TARGET_TRANSFORM
+LOG_BACKTRANSFORM_BIAS_CORRECTION
 ```
 
-`TARGET_TRANSFORM` đã được implement trong engine với giá trị hợp lệ `auto`, `none`, `log1p`. Khi dùng `log1p`, engine fit regression và kriging residual trên thang transform, back-transform prediction về đơn vị gốc, và tính CV metric trên đơn vị gốc. Nếu dữ liệu âm, validator vẫn nhận tham số nhưng engine sẽ fallback về `none` và ghi cảnh báo.
+`TARGET_TRANSFORM` đã được implement trong engine với giá trị hợp lệ `auto`, `none`, `log1p`. Khi dùng `log1p`, engine fit regression và kriging residual trên thang transform, back-transform prediction về đơn vị gốc, và tính CV metric trên đơn vị gốc. OK baseline cũng fit trên cùng thang transform rồi back-transform trước khi tính metric. Nếu profile yêu cầu không âm và dữ liệu âm, engine fallback về `none` và ghi cảnh báo. `LOG_BACKTRANSFORM_BIAS_CORRECTION` là tùy chọn boolean; khi `TRUE`, OK/RK dùng xấp xỉ `exp(mu + 0.5*sigma^2) - 1` nếu có variance trên model scale.
 
 ## 7. Protected Settings
 
@@ -185,7 +187,7 @@ Dừng nếu:
 - Đạt `MAX_ITERATIONS`.
 - Validator từ chối.
 - MANUAL_REVIEW hoặc REJECT.
-- Hai lần rerun liên tiếp không cải thiện RMSE khoảng 3-5% và cũng không cải thiện diagnostic như nugget/sill, range_hit_max, class accuracy hoặc uncertainty.
+- Hai lần rerun liên tiếp không cải thiện RMSE khoảng 3-5% và cũng không cải thiện diagnostic như nugget/sill, range_hit_max, class accuracy, uncertainty hoặc transform diagnostics.
 - RMSE tốt hơn nhưng variogram xấu hơn rõ.
 - R²_pred vẫn âm sau nhiều iteration.
 - Không có candidate variogram/neighborhood hợp lệ.
@@ -200,7 +202,7 @@ Inventory, index và query tài liệu local:
 .\run_rag_query.ps1 -Query "variogram range spatial CV" -TopK 8
 ```
 
-Không tải, chia sẻ hoặc commit tài liệu bản quyền. Chỉ dùng tài liệu local do người dùng cung cấp hợp pháp. Agent loop không gọi LLM, nhưng tạo `rag_context_iter_*.json` để agent bên ngoài có câu truy vấn và evidence card nội bộ khi viết `ai_decision.json`.
+Không tải, chia sẻ hoặc commit tài liệu bản quyền. Chỉ dùng tài liệu local do người dùng cung cấp hợp pháp. Agent loop không gọi LLM, nhưng tạo `rag_context_iter_*.json` và `decision_packet_iter_*.md` để agent bên ngoài có run diagnostics, câu truy vấn RAG, evidence card summaries, whitelist và safety limits khi viết `ai_decision.json`.
 
 ## 11. Không Được Làm
 

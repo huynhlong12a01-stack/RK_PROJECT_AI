@@ -81,7 +81,7 @@ agent_allowed_parameters <- function() {
     "VARIOGRAM_CUTOFF", "VARIOGRAM_WIDTH", "VARIOGRAM_RANGE_MIN", "VARIOGRAM_RANGE_MAX",
     "NMAX_NEIGHBORS", "SEARCH_RADIUS", "AUTO_NEIGHBORS", "AUTO_NEIGHBOR_NMAX_CANDIDATES",
     "AUTO_NEIGHBOR_SEARCH_RADIUS_CANDIDATES", "AUTO_NEIGHBOR_CV_METHOD", "AUTO_NEIGHBOR_MAX_CANDIDATES",
-    "CV_METHODS", "CV_K_FOLDS", "CLAMP_TO_SAMPLE_RANGE", "TARGET_TRANSFORM")
+    "CV_METHODS", "CV_K_FOLDS", "CLAMP_TO_SAMPLE_RANGE", "TARGET_TRANSFORM", "LOG_BACKTRANSFORM_BIAS_CORRECTION")
 }
 
 agent_protected_parameters <- function() {
@@ -135,6 +135,7 @@ agent_validate_parameter <- function(name, value, safety_limits = list()) {
   if (name == "CV_METHODS" && (!all(val_vec %in% c("random", "spatial_kmeans")) || length(val_vec) == 0)) err <- "CV_METHODS must contain random and/or spatial_kmeans."
   if (name == "CLAMP_TO_SAMPLE_RANGE" && (!is.logical(value) || length(value) != 1)) err <- "CLAMP_TO_SAMPLE_RANGE must be true or false."
   if (name == "TARGET_TRANSFORM" && !(value %in% c("auto", "none", "log1p"))) err <- "TARGET_TRANSFORM must be auto, none, or log1p."
+  if (name == "LOG_BACKTRANSFORM_BIAS_CORRECTION" && (!is.logical(value) || length(value) != 1)) err <- "LOG_BACKTRANSFORM_BIAS_CORRECTION must be true or false."
   err
 }
 

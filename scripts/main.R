@@ -13,6 +13,7 @@ if (nzchar(rk_config_override)) {
 }
 
 source("rk_evaluation/evaluation.R")
+source("scripts/transform_utils.R")
 
 packages <- c("sf", "terra", "gstat", "sp")
 
@@ -119,71 +120,6 @@ resolve_utm_epsg <- function(points_df, lon_col, lat_col, configured_epsg) {
   }
   list(epsg = as.integer(epsg), auto_epsg = as.integer(auto_epsg), mode = "configured", warning = warning, center_lon = center_lon, center_lat = center_lat)
 }
-rk_transform_values <- function(x, transform) {
-  x <- suppressWarnings(as.numeric(x))
-  transform <- tolower(as.character(transform %||% "none")[1])
-  if (identical(transform, "log1p")) return(log1p(x))
-  x
-}
-
-rk_back_transform_values <- function(x, transform) {
-  x <- suppressWarnings(as.numeric(x))
-  transform <- tolower(as.character(transform %||% "none")[1])
-  if (identical(transform, "log1p")) return(expm1(x))
-  x
-}
-
-rk_back_transform_variance_values <- function(variance, mean_model_scale, transform) {
-  variance <- suppressWarnings(as.numeric(variance))
-  mean_model_scale <- suppressWarnings(as.numeric(mean_model_scale))
-  transform <- tolower(as.character(transform %||% "none")[1])
-  if (identical(transform, "log1p")) return(variance * exp(2 * mean_model_scale))
-  variance
-}
-
-rk_back_transform_raster <- function(r, transform) {
-  transform <- tolower(as.character(transform %||% "none")[1])
-  if (identical(transform, "log1p")) return(terra::app(r, fun = expm1))
-  r
-}
-
-rk_back_transform_variance_raster <- function(variance_raster, mean_model_raster, transform) {
-  transform <- tolower(as.character(transform %||% "none")[1])
-  if (identical(transform, "log1p")) return(variance_raster * exp(2 * mean_model_raster))
-  variance_raster
-}
-
-resolve_target_transform <- function(target_field, values) {
-  requested <- if (exists("TARGET_TRANSFORM")) TARGET_TRANSFORM else "auto"
-  requested <- tolower(as.character(requested[1]))
-  if (!(requested %in% c("auto", "none", "log1p"))) {
-    stop("TARGET_TRANSFORM must be 'auto', 'none', or 'log1p'.")
-  }
-
-  profiles <- load_evaluation_profiles(EVALUATION_PROFILE_FILE %||% "config/evaluation_profiles.R")
-  profile <- match_indicator_profile(target_field, profiles)
-  recommendation <- rk_eval_transform_recommendation(values, profile)
-  selected <- if (identical(requested, "auto")) recommendation$transform else requested
-  selected <- tolower(as.character(selected %||% "none"))
-  if (!(selected %in% c("none", "log1p"))) selected <- "none"
-
-  x <- suppressWarnings(as.numeric(values))
-  x <- x[is.finite(x)]
-  warning <- NULL
-  if (identical(selected, "log1p") && any(x < 0, na.rm = TRUE)) {
-    warning <- "TARGET_TRANSFORM resolved to log1p, but negative target values were found; falling back to none."
-    selected <- "none"
-  }
-
-  list(
-    requested = requested,
-    selected = selected,
-    profile_name = profile$profile_name %||% target_field,
-    recommendation = recommendation,
-    warning = warning
-  )
-}
-
 replace_formula_lhs <- function(formula_obj, lhs_name) {
   rhs <- paste(deparse(formula_obj[[3]]), collapse = " ")
   as.formula(paste(bt(lhs_name), "~", rhs))
@@ -603,7 +539,7 @@ make_fold_ids <- function(points_sf, method, k, seed) {
   stop(paste0("Unknown CV method: ", method))
 }
 
-run_cv_comparison <- function(model_df, points_sf, regression_formula, target_field, cv_method, manual_vgm, target_model_field = target_field, target_transform = "none") {
+run_cv_comparison <- function(model_df, points_sf, regression_formula, target_field, cv_method, manual_vgm, target_model_field = target_field, target_transform = "none", log_bias_correction = FALSE) {
   fold_ids <- make_fold_ids(
     points_sf = points_sf,
     method = cv_method,
@@ -722,13 +658,13 @@ run_cv_comparison <- function(model_df, points_sf, regression_formula, target_fi
   }
 
   observed <- df[[target_field]]
-  pred_reg <- rk_back_transform_values(pred_reg_model, target_transform)
-  pred_ok <- rk_back_transform_values(pred_ok_model, target_transform)
-  pred_rk <- rk_back_transform_values(pred_rk_model, target_transform)
   var_ok_model <- var_ok
   var_rk_model <- var_rk
-  var_ok <- rk_back_transform_variance_values(var_ok_model, pred_ok_model, target_transform)
-  var_rk <- rk_back_transform_variance_values(var_rk_model, pred_rk_model, target_transform)
+  pred_reg <- rk_back_transform_values(pred_reg_model, target_transform)
+  pred_ok <- rk_back_transform_values(pred_ok_model, target_transform, variance = var_ok_model, bias_correction = log_bias_correction)
+  pred_rk <- rk_back_transform_values(pred_rk_model, target_transform, variance = var_rk_model, bias_correction = log_bias_correction)
+  var_ok <- rk_back_transform_variance_values(var_ok_model, pred_ok_model, target_transform, bias_correction = log_bias_correction)
+  var_rk <- rk_back_transform_variance_values(var_rk_model, pred_rk_model, target_transform, bias_correction = log_bias_correction)
 
   summary <- rbind(
     metric_table(observed, pred_reg, NULL, "Regression-only", cv_method),
@@ -763,7 +699,7 @@ run_cv_comparison <- function(model_df, points_sf, regression_formula, target_fi
     folds = fold_report
   )
 }
-auto_select_neighbors <- function(model_df, points_sf, regression_formula, target_field, manual_vgm, target_model_field = target_field, target_transform = "none") {
+auto_select_neighbors <- function(model_df, points_sf, regression_formula, target_field, manual_vgm, target_model_field = target_field, target_transform = "none", log_bias_correction = FALSE) {
   if (!isTRUE(AUTO_NEIGHBORS) || !isTRUE(RUN_CROSS_VALIDATION)) {
     return(list(selected_nmax = NMAX_NEIGHBORS, selected_radius = SEARCH_RADIUS, table = data.frame(), method = "disabled"))
   }
@@ -810,7 +746,8 @@ auto_select_neighbors <- function(model_df, points_sf, regression_formula, targe
         cv_method = cv_method,
         manual_vgm = manual_vgm,
         target_model_field = target_model_field,
-        target_transform = target_transform
+        target_transform = target_transform,
+        log_bias_correction = log_bias_correction
       ),
       silent = TRUE
     )
@@ -1349,12 +1286,14 @@ log_msg("Sample max: ", round(sample_max, 4))
 
 target_transform_info <- resolve_target_transform(TARGET_FIELD, model_df[[TARGET_FIELD]])
 TARGET_TRANSFORM_ACTIVE <- target_transform_info$selected
+LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE <- isTRUE(LOG_BACKTRANSFORM_BIAS_CORRECTION) && identical(TARGET_TRANSFORM_ACTIVE, "log1p")
 MODEL_TARGET_FIELD <- ".rk_target_model"
 model_df[[MODEL_TARGET_FIELD]] <- rk_transform_values(model_df[[TARGET_FIELD]], TARGET_TRANSFORM_ACTIVE)
 pts_model_sf[[MODEL_TARGET_FIELD]] <- model_df[[MODEL_TARGET_FIELD]]
 if (!is.null(target_transform_info$warning)) add_science_warning(target_transform_info$warning)
 log_msg("Target transform requested: ", target_transform_info$requested)
 log_msg("Target transform used: ", TARGET_TRANSFORM_ACTIVE)
+log_msg("Log back-transform bias correction: ", LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE)
 log_msg("Transform profile: ", target_transform_info$profile_name)
 log_msg("Transform reason: ", target_transform_info$recommendation$reason %||% "")
 
@@ -1482,20 +1421,42 @@ plot_file <- out_path("02_regression_model", paste0("residual_histogram_", TARGE
 png(plot_file, width = 1200, height = 900)
 hist(
   model_df$residual,
-  main = paste("Residual histogram -", TARGET_FIELD),
-  xlab = "Residual"
+  main = paste("Residual histogram - model scale -", TARGET_FIELD),
+  xlab = paste0("Residual on ", ifelse(identical(TARGET_TRANSFORM_ACTIVE, "none"), "original", TARGET_TRANSFORM_ACTIVE), " scale")
 )
 save_plot_done(plot_file)
 
 plot_file <- out_path("02_regression_model", paste0("residual_vs_predicted_", TARGET_NAME, ".png"))
 png(plot_file, width = 1200, height = 900)
 plot(
-  model_df$reg_pred,
+  model_df$reg_pred_model,
   model_df$residual,
   pch = 19,
-  xlab = "Regression predicted",
-  ylab = "Residual",
-  main = paste("Residual vs Predicted -", TARGET_FIELD)
+  xlab = paste0("Regression predicted on ", ifelse(identical(TARGET_TRANSFORM_ACTIVE, "none"), "original", TARGET_TRANSFORM_ACTIVE), " scale"),
+  ylab = paste0("Residual on ", ifelse(identical(TARGET_TRANSFORM_ACTIVE, "none"), "original", TARGET_TRANSFORM_ACTIVE), " scale"),
+  main = paste("Residual vs Predicted - model scale -", TARGET_FIELD)
+)
+abline(h = 0, col = "red", lwd = 2)
+save_plot_done(plot_file)
+
+plot_file <- out_path("02_regression_model", paste0("residual_original_histogram_", TARGET_NAME, ".png"))
+png(plot_file, width = 1200, height = 900)
+hist(
+  model_df$residual_original,
+  main = paste("Residual histogram - original units -", TARGET_FIELD),
+  xlab = "Residual on original units"
+)
+save_plot_done(plot_file)
+
+plot_file <- out_path("02_regression_model", paste0("residual_original_vs_predicted_", TARGET_NAME, ".png"))
+png(plot_file, width = 1200, height = 900)
+plot(
+  model_df$reg_pred,
+  model_df$residual_original,
+  pch = 19,
+  xlab = "Regression predicted on original units",
+  ylab = "Residual on original units",
+  main = paste("Residual vs Predicted - original units -", TARGET_FIELD)
 )
 abline(h = 0, col = "red", lwd = 2)
 save_plot_done(plot_file)
@@ -1660,7 +1621,8 @@ if (exists("AUTO_NEIGHBORS") && isTRUE(AUTO_NEIGHBORS)) {
     target_field = TARGET_FIELD,
     manual_vgm = fitted_vgm,
     target_model_field = MODEL_TARGET_FIELD,
-    target_transform = TARGET_TRANSFORM_ACTIVE
+    target_transform = TARGET_TRANSFORM_ACTIVE,
+    log_bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE
   )
 
   if (!is.null(neighbor_tuning$table) && nrow(neighbor_tuning$table) > 0) {
@@ -1702,7 +1664,8 @@ if (isTRUE(RUN_CROSS_VALIDATION)) {
         cv_method = cv_method,
         manual_vgm = fitted_vgm,
         target_model_field = MODEL_TARGET_FIELD,
-        target_transform = TARGET_TRANSFORM_ACTIVE
+        target_transform = TARGET_TRANSFORM_ACTIVE,
+        log_bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE
       ),
       silent = TRUE
     )
@@ -1857,7 +1820,17 @@ writeRaster(
 log_msg("\n[11] Create final Regression Kriging raster...")
 
 rk_final_model <- regression_prediction_model + residual_raster
-rk_final <- rk_back_transform_raster(rk_final_model, TARGET_TRANSFORM_ACTIVE)
+residual_var_raster <- clamp(
+  residual_var_raster,
+  lower = 0,
+  values = TRUE
+)
+rk_final <- rk_back_transform_raster(
+  rk_final_model,
+  TARGET_TRANSFORM_ACTIVE,
+  variance_raster = residual_var_raster,
+  bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE
+)
 rk_final <- mask(rk_final, complete_pc_mask)
 
 names(rk_final) <- paste0("RK_", TARGET_NAME)
@@ -1875,13 +1848,12 @@ if (CLAMP_TO_SAMPLE_RANGE) {
   log_msg("Clamped final raster to sample min/max.")
 }
 
-residual_var_raster <- clamp(
+rk_variance_original <- rk_back_transform_variance_raster(
   residual_var_raster,
-  lower = 0,
-  values = TRUE
+  rk_final_model,
+  TARGET_TRANSFORM_ACTIVE,
+  bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE
 )
-
-rk_variance_original <- rk_back_transform_variance_raster(residual_var_raster, rk_final_model, TARGET_TRANSFORM_ACTIVE)
 rk_variance_original <- clamp(rk_variance_original, lower = 0, values = TRUE)
 rk_std <- sqrt(rk_variance_original)
 rk_std <- mask(rk_std, complete_pc_mask)
@@ -1946,6 +1918,29 @@ rk_mean <- global(rk_final, "mean", na.rm = TRUE)[1, 1]
 std_min <- global(rk_std, "min", na.rm = TRUE)[1, 1]
 std_max <- global(rk_std, "max", na.rm = TRUE)[1, 1]
 std_mean <- global(rk_std, "mean", na.rm = TRUE)[1, 1]
+std_q80 <- tryCatch(
+  as.numeric(global(rk_std, function(x, ...) stats::quantile(x, 0.80, na.rm = TRUE), na.rm = TRUE)[1, 1]),
+  error = function(e) NA_real_
+)
+std_high_pct <- tryCatch(
+  if (is.finite(std_q80)) as.numeric(global(rk_std >= std_q80, "mean", na.rm = TRUE)[1, 1]) * 100 else NA_real_,
+  error = function(e) NA_real_
+)
+var_min <- global(rk_variance_original, "min", na.rm = TRUE)[1, 1]
+var_max <- global(rk_variance_original, "max", na.rm = TRUE)[1, 1]
+var_mean <- global(rk_variance_original, "mean", na.rm = TRUE)[1, 1]
+uncertainty_summary <- list(
+  available = TRUE,
+  min_sd = std_min,
+  mean_sd = std_mean,
+  max_sd = std_max,
+  min_variance = var_min,
+  mean_variance = var_mean,
+  max_variance = var_max,
+  high_uncertainty_threshold = std_q80,
+  high_uncertainty_area_percent = std_high_pct,
+  warnings = character(0)
+)
 
 best_variogram_sse <- NA
 if (exists("candidate_table") && nrow(candidate_table) > 0) {
@@ -2000,6 +1995,7 @@ report <- data.frame(
   target = TARGET_FIELD,
   target_transform_requested = target_transform_info$requested,
   target_transform_used = TARGET_TRANSFORM_ACTIVE,
+  log_backtransform_bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE,
   predictors = paste(PREDICTORS, collapse = ", "),
   n_predictors = length(PREDICTORS),
   n_points_raw_valid = nrow(pts_raw),
@@ -2090,7 +2086,7 @@ quality_context <- list(
   config_path = EVALUATION_PROFILE_FILE,
   observed = model_df[[TARGET_FIELD]],
   regression_predicted = model_df$reg_pred,
-  target_transform = list(requested = target_transform_info$requested, used = TARGET_TRANSFORM_ACTIVE, profile = target_transform_info$profile_name, reason = target_transform_info$recommendation$reason %||% ""),
+  target_transform = list(requested = target_transform_info$requested, used = TARGET_TRANSFORM_ACTIVE, profile = target_transform_info$profile_name, reason = target_transform_info$recommendation$reason %||% "", requires_nonnegative = target_transform_info$requires_nonnegative, log_backtransform_bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE, metric_scale = "original units", ok_baseline_scale = ifelse(identical(TARGET_TRANSFORM_ACTIVE, "log1p"), "log1p(target), back-transformed before metrics", "original units")),
   residuals = model_df$residual,
   coordinates = as.data.frame(st_coordinates(pts_model_sf)),
   variogram_params = list(
@@ -2113,7 +2109,8 @@ quality_context <- list(
   cv_regression_predicted = quality_cv$regression_only,
   cv_ok_predicted = quality_cv$ordinary_kriging,
   cv_rk_predicted = quality_cv$regression_kriging,
-  prediction_sd_values = terra::values(rk_std, mat = FALSE),
+  prediction_sd_values = NULL,
+  prediction_sd_summary = uncertainty_summary,
   warnings = scientific_warnings,
   report_links = list(
     "Interactive variogram" = paste0("interactive/", basename(report_interactive_variogram_file)),
