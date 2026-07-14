@@ -25,7 +25,7 @@ jobs:
       - name: Install minimal CI packages
         shell: pwsh
         run: |
-          Rscript -e "install.packages(c('jsonlite','readr','digest','yaml'), repos='https://cloud.r-project.org')"
+          Rscript -e "install.packages(c('jsonlite','readr','digest','yaml','openxlsx2'), repos='https://cloud.r-project.org')"
 
       - name: Parse R scripts
         shell: pwsh
@@ -37,10 +37,22 @@ jobs:
         run: |
           Rscript scripts/check_dependencies.R --profile agent --output agent/responses/dependency_check_ci.json
 
+      - name: Run input template smoke test
+        shell: pwsh
+        run: |
+          Rscript scripts/input_template_smoke_test.R
+
       - name: Run transform smoke test
         shell: pwsh
         run: |
           Rscript scripts/transform_smoke_test.R
+
+      - name: Run actual-sample and sensitivity unit tests
+        shell: pwsh
+        run: |
+          Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_actual_qa.R
+          Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_outside_covariate_dissimilarity.R
+          Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_sensitivity_comparison.R
 
       - name: Run agent smoke test
         shell: pwsh
@@ -50,7 +62,7 @@ jobs:
       - name: Run agent loop dry-run
         shell: pwsh
         run: |
-          Rscript scripts/agent_loop.R --target pH --max_iterations 1 --dry_run true
+          Rscript scripts/agent_loop.R --target pH_H2O --max_iterations 1 --dry_run true
 
       - name: Run RAG metadata smoke test
         shell: pwsh
@@ -72,12 +84,22 @@ jobs:
       - name: Install geospatial packages
         shell: pwsh
         run: |
-          Rscript -e "install.packages(c('jsonlite','readr','digest','yaml','sf','terra','gstat','sp'), repos='https://cloud.r-project.org')"
+          Rscript -e "install.packages(c('jsonlite','readr','digest','yaml','sf','terra','gstat','sp','blockCV','CAST','lmtest'), repos='https://cloud.r-project.org')"
 
       - name: Check core dependency profile
         shell: pwsh
         run: |
           Rscript scripts/check_dependencies.R --profile core --output agent/responses/dependency_check_core_ci.json
+
+      - name: Run scientific nested-CV smoke test
+        shell: pwsh
+        run: |
+          Rscript scripts/scientific_validation_smoke_test.R
+
+      - name: Run synthetic full-pipeline smoke test
+        shell: pwsh
+        run: |
+          Rscript scripts/full_pipeline_smoke_test.R
 
       - name: Run raster preflight if data is present
         shell: pwsh

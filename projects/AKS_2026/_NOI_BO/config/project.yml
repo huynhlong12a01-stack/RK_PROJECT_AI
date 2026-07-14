@@ -1,0 +1,37 @@
+project_id: AKS_2026
+crs_epsg: 32649
+resolution_m: 10
+gee_project_id: rkapp-492504
+
+source:
+  taken_samples_csv: projects/AKS_2026/02_NOI_SUY_BAN_DO/01_DAU_VAO/sample_actual.csv
+  roi_file: projects/AKS_2026/01_THIET_KE_LAY_MAU/01_DAU_VAO/roi.geojson
+  optimal_samples_csv: projects/AKS_2026/01_THIET_KE_LAY_MAU/02_KET_QUA/sample_cLHS_FULL.csv
+  legacy_pca_dir: projects/AKS_2026/_NOI_BO/work/design
+  soil_vector_file: projects/AKS_2026/01_THIET_KE_LAY_MAU/01_DAU_VAO/soil_type.geojson
+
+legacy_parameters:
+  start_date: 2026-01-01
+  end_date: 2026-04-01
+
+support_policy:
+  pca_policy: frozen_workflow1_reference
+  legacy_pc_priority_inside_existing_mask: true
+  covariate_support_buffer_m: 300
+
+runtime:
+  standardized_points_csv: projects/AKS_2026/_NOI_BO/work/interpolation/sample_actual_clean.csv
+  sample_qa_csv: projects/AKS_2026/_NOI_BO/work/interpolation/qa/sample_roi_status.csv
+  actual_assessment_csv: projects/AKS_2026/02_NOI_SUY_BAN_DO/01_DAU_VAO/outside_sample_review.csv
+  outside_points_gpkg: projects/AKS_2026/_NOI_BO/work/interpolation/outside_samples.gpkg
+  support_buffers_gpkg: projects/AKS_2026/_NOI_BO/work/interpolation/covariate_support_buffers.gpkg
+  expanded_covariate_dir: projects/AKS_2026/_NOI_BO/work/interpolation
+  aligned_covariate_dir: projects/AKS_2026/_NOI_BO/work/interpolation/_aligned
+  pca_support_dir: projects/AKS_2026/_NOI_BO/work/interpolation
+  model_input_csv: projects/AKS_2026/_NOI_BO/work/models/input/soil_points.csv
+  qa_dir: projects/AKS_2026/_NOI_BO/work/interpolation/qa
+  run_dir: projects/AKS_2026/_NOI_BO/work/models
+  report_dir: projects/AKS_2026/02_NOI_SUY_BAN_DO/02_KET_QUA/reports
+
+outside_sample_review:
+  default_relocation_reason: access_constraint_near_planned_location

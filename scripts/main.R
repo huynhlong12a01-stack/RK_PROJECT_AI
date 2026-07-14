@@ -14,6 +14,7 @@ if (nzchar(rk_config_override)) {
 
 source("rk_evaluation/evaluation.R")
 source("scripts/transform_utils.R")
+source("scripts/spatial_validation.R")
 
 packages <- c("sf", "terra", "gstat", "sp")
 
@@ -188,10 +189,10 @@ get_vgm_params <- function(vgm_obj) {
 
   if (nrow(struct) == 0) {
     return(list(
-      model = "Exp",
+      model = "Nug",
       nugget = nugget,
       psill = 0,
-      range = 1
+      range = 0
     ))
   }
 
@@ -212,173 +213,226 @@ variogram_practical_range <- function(model, range) {
   range
 }
 
-variogram_candidate_score <- function(sse, params, experimental_vgm) {
+variogram_candidate_score <- function(sse, params, experimental_vgm, singular = FALSE) {
   nugget <- suppressWarnings(as.numeric(params$nugget %||% NA_real_))
   psill <- suppressWarnings(as.numeric(params$psill %||% NA_real_))
   total_sill <- nugget + psill
   nugget_sill <- if (is.finite(total_sill) && total_sill > 0) nugget / total_sill else NA_real_
   practical <- variogram_practical_range(params$model, params$range)
-  penalty <- 0
-  penalty_reasons <- character(0)
-
-  if (is.finite(nugget_sill) && nugget_sill > MAX_NUGGET_SILL_RATIO_WARNING) {
-    penalty <- penalty + 0.80
-    penalty_reasons <- c(penalty_reasons, "high_nugget_sill")
-  } else if (is.finite(nugget_sill) && nugget_sill > 0.50) {
-    penalty <- penalty + 0.25
-    penalty_reasons <- c(penalty_reasons, "moderate_nugget_sill")
+  range_hit <- is.finite(params$range) && params$range >= 0.98 * VARIOGRAM_RANGE_MAX
+  practical_ratio <- if (is.finite(practical) && is.finite(VARIOGRAM_CUTOFF) &&
+      VARIOGRAM_CUTOFF > 0) practical / VARIOGRAM_CUTOFF else NA_real_
+  nugget_penalty <- if (!is.finite(nugget_sill)) 0.5 else
+    pmin(1, pmax(0, (nugget_sill - 0.50) / 0.50))
+  range_penalty <- if (range_hit) 1 else if (is.finite(practical_ratio))
+    pmin(1, pmax(0, (practical_ratio - 0.60) / 0.40)) else 0.5
+  low_pair_fraction <- 0
+  if ("np" %in% names(experimental_vgm) && nrow(experimental_vgm) > 0) {
+    low_pair_fraction <- mean(experimental_vgm$np < MIN_PAIRS_PER_VARIOGRAM_BIN, na.rm = TRUE)
   }
-
-  if (is.finite(params$range) && params$range >= 0.98 * VARIOGRAM_RANGE_MAX) {
-    penalty <- penalty + 1.00
-    penalty_reasons <- c(penalty_reasons, "range_hits_max")
+  flags <- character(0)
+  if (isTRUE(singular)) flags <- c(flags, "singular_fit")
+  if (nugget_penalty > 0) flags <- c(flags, "high_nugget_sill")
+  if (range_hit) flags <- c(flags, "range_hits_max")
+  if (is.finite(practical_ratio) &&
+      practical_ratio > MAX_PRACTICAL_RANGE_FACTOR_OF_CUTOFF) {
+    flags <- c(flags, "practical_range_near_cutoff")
   }
-  if (is.finite(practical) && is.finite(VARIOGRAM_CUTOFF) && practical > MAX_PRACTICAL_RANGE_FACTOR_OF_CUTOFF * VARIOGRAM_CUTOFF) {
-    penalty <- penalty + 0.60
-    penalty_reasons <- c(penalty_reasons, "practical_range_near_cutoff")
-  }
-  if ("np" %in% names(experimental_vgm)) {
-    low_bins <- sum(experimental_vgm$np < MIN_PAIRS_PER_VARIOGRAM_BIN, na.rm = TRUE)
-    if (low_bins > 0) {
-      penalty <- penalty + min(0.50, 0.08 * low_bins)
-      penalty_reasons <- c(penalty_reasons, "low_lag_pairs")
-    }
-  }
-
+  if (low_pair_fraction > 0) flags <- c(flags, "low_lag_pairs")
   list(
-    candidate_score = log1p(sse) + penalty,
-    diagnostic_penalty = penalty,
-    diagnostic_flags = paste(unique(penalty_reasons), collapse = ";"),
+    nugget_penalty = nugget_penalty,
+    range_penalty = range_penalty,
+    lag_penalty = pmin(1, low_pair_fraction),
+    singular_penalty = as.numeric(isTRUE(singular)),
+    diagnostic_flags = paste(unique(flags), collapse = ";"),
     nugget_sill_ratio = nugget_sill,
     practical_range = practical,
-    range_hit_max = is.finite(params$range) && params$range >= 0.98 * VARIOGRAM_RANGE_MAX
+    range_hit_max = range_hit,
+    sse_per_pair = sse / max(sum(experimental_vgm$np %||% 1, na.rm = TRUE), 1)
   )
 }
-fit_variogram_auto_select <- function(experimental_vgm, residual_values) {
+
+make_pure_nugget_variogram <- function(values,
+    reason = "no_valid_structured_candidate") {
+  nugget <- suppressWarnings(stats::var(values, na.rm = TRUE))
+  if (!is.finite(nugget) || nugget < 0) nugget <- 0
+  model <- gstat::vgm(psill = nugget, model = "Nug", range = 0)
+  attr(model, "pure_nugget") <- TRUE
+  attr(model, "fallback_reason") <- reason
+  attr(model, "singular") <- FALSE
+  model
+}
+
+is_pure_nugget_variogram <- function(model,
+    threshold = PURE_NUGGET_RATIO_THRESHOLD) {
+  if (is.null(model)) return(FALSE)
+  if (isTRUE(attr(model, "pure_nugget"))) return(TRUE)
+  params <- get_vgm_params(model)
+  sill <- params$nugget + params$psill
+  ratio <- if (is.finite(sill) && sill > 0) params$nugget / sill else NA_real_
+  identical(params$model, "Nug") ||
+    (!is.finite(sill) || sill <= 0) ||
+    (is.finite(ratio) && ratio >= threshold)
+}
+
+fit_variogram_auto_select <- function(experimental_vgm, residual_values,
+    candidate_models = VARIOGRAM_CANDIDATE_MODELS) {
   residual_var <- var(residual_values, na.rm = TRUE)
-
-  if (is.na(residual_var) || residual_var <= 0) {
-    residual_var <- 1
-  }
-
+  if (is.na(residual_var) || residual_var <= 0) residual_var <- 1
   candidates <- expand.grid(
-    model = VARIOGRAM_CANDIDATE_MODELS,
+    model = unique(as.character(candidate_models)),
     range_factor = VARIOGRAM_INITIAL_RANGE_FACTORS,
     nugget_factor = VARIOGRAM_INITIAL_NUGGET_FACTORS,
     psill_factor = VARIOGRAM_INITIAL_PSILL_FACTORS,
     stringsAsFactors = FALSE
   )
-
   result_rows <- list()
   fit_objects <- list()
-  idx <- 1
 
   for (i in seq_len(nrow(candidates))) {
     m <- candidates$model[i]
-
-    init_range <- VARIOGRAM_CUTOFF * candidates$range_factor[i]
-    init_range <- max(VARIOGRAM_RANGE_MIN, min(init_range, VARIOGRAM_RANGE_MAX))
-
+    init_range <- max(VARIOGRAM_RANGE_MIN,
+      min(VARIOGRAM_CUTOFF * candidates$range_factor[i], VARIOGRAM_RANGE_MAX))
     init_nugget <- residual_var * candidates$nugget_factor[i]
-    init_psill  <- residual_var * candidates$psill_factor[i]
-
+    init_psill <- residual_var * candidates$psill_factor[i]
     init_model <- vgm(
-      psill = init_psill,
-      model = m,
-      range = init_range,
-      nugget = init_nugget
-    )
-
-    fit_try <- suppressWarnings(
-      try(
-        fit.variogram(
-          experimental_vgm,
-          model = init_model
-        ),
+      psill = init_psill, model = m, range = init_range, nugget = init_nugget)
+    fit_try <- NULL
+    invisible(utils::capture.output({
+      fit_try <- suppressWarnings(try(
+        fit.variogram(experimental_vgm, model = init_model, fit.method = 7),
         silent = TRUE
-      )
-    )
-
-    if (inherits(fit_try, "try-error")) {
-      next
-    }
-
-    if (any(is.na(fit_try$psill)) ||
-        any(is.na(fit_try$range)) ||
-        any(fit_try$psill < 0, na.rm = TRUE) ||
-        any(fit_try$range < 0, na.rm = TRUE)) {
-      next
-    }
+      ))
+    }))
+    if (inherits(fit_try, "try-error")) next
+    if (any(is.na(fit_try$psill)) || any(is.na(fit_try$range)) ||
+        any(fit_try$psill < 0, na.rm = TRUE) || any(fit_try$range < 0, na.rm = TRUE)) next
 
     params <- get_vgm_params(fit_try)
-
-    if (params$range < VARIOGRAM_RANGE_MIN || params$range > VARIOGRAM_RANGE_MAX) {
-      next
-    }
-
-    sse <- attr(fit_try, "SSErr")
-
-    if (is.null(sse) || is.na(sse) || !is.finite(sse)) {
-      next
-    }
-
-    diag_score <- variogram_candidate_score(sse, params, experimental_vgm)
-
-    result_rows[[idx]] <- data.frame(
-      model = m,
-      init_range = init_range,
-      init_nugget = init_nugget,
-      init_psill = init_psill,
-      fitted_model = params$model,
-      fitted_nugget = params$nugget,
-      fitted_psill = params$psill,
+    sse <- suppressWarnings(as.numeric(attr(fit_try, "SSErr")))
+    if (!is.finite(sse)) next
+    singular <- isTRUE(attr(fit_try, "singular"))
+    in_range <- is.finite(params$range) &&
+      params$range >= VARIOGRAM_RANGE_MIN && params$range <= VARIOGRAM_RANGE_MAX
+    diagnostics <- variogram_candidate_score(
+      sse, params, experimental_vgm, singular = singular)
+    accepted <- !singular && in_range
+    row_id <- length(result_rows) + 1L
+    result_rows[[row_id]] <- data.frame(
+      model = m, init_range = init_range, init_nugget = init_nugget,
+      init_psill = init_psill, fitted_model = params$model,
+      fitted_nugget = params$nugget, fitted_psill = params$psill,
       fitted_range = params$range,
-      practical_range = diag_score$practical_range,
-      nugget_sill_ratio = diag_score$nugget_sill_ratio,
-      range_hit_max = diag_score$range_hit_max,
-      sse = sse,
-      diagnostic_penalty = diag_score$diagnostic_penalty,
-      diagnostic_flags = diag_score$diagnostic_flags,
-      candidate_score = diag_score$candidate_score,
+      practical_range = diagnostics$practical_range,
+      nugget_sill_ratio = diagnostics$nugget_sill_ratio,
+      range_hit_max = diagnostics$range_hit_max,
+      sse = sse, sse_per_pair = diagnostics$sse_per_pair,
+      nugget_penalty = diagnostics$nugget_penalty,
+      range_penalty = diagnostics$range_penalty,
+      lag_penalty = diagnostics$lag_penalty,
+      singular = singular, converged = !singular,
+      fit_method = 7L, n_iterations = NA_integer_,
+      accepted = accepted,
+      status = if (accepted) "valid" else if (singular) "singular_rejected" else "range_rejected",
+      diagnostic_flags = diagnostics$diagnostic_flags,
       stringsAsFactors = FALSE
     )
-
-    fit_objects[[idx]] <- fit_try
-    idx <- idx + 1
+    fit_objects[[row_id]] <- if (accepted) fit_try else NULL
   }
 
   if (length(result_rows) == 0) {
     return(list(
-      fitted = NULL,
-      table = data.frame()
+      fitted = make_pure_nugget_variogram(
+        residual_values, "all_structured_candidates_failed"),
+      table = data.frame(),
+      fallback = "pure_nugget"
     ))
   }
-
   results <- do.call(rbind, result_rows)
-  best_i <- which.min(results$candidate_score)
-
-  return(list(
+  results$sse_rank <- NA_real_
+  results$candidate_score <- Inf
+  valid <- which(results$accepted & is.finite(results$sse_per_pair))
+  if (length(valid) == 0) {
+    pure_vgm <- make_pure_nugget_variogram(
+      residual_values, "no_valid_structured_candidate")
+    pure_params <- get_vgm_params(pure_vgm)
+    pure_level <- pure_params$nugget
+    weights <- if ("np" %in% names(experimental_vgm)) {
+      pmax(suppressWarnings(as.numeric(experimental_vgm$np)), 1)
+    } else {
+      rep(1, nrow(experimental_vgm))
+    }
+    pure_sse <- sum(
+      weights * (experimental_vgm$gamma - pure_level)^2,
+      na.rm = TRUE
+    )
+    fallback_row <- data.frame(
+      model = "Nug", init_range = 0, init_nugget = pure_level,
+      init_psill = 0, fitted_model = "Nug",
+      fitted_nugget = pure_level, fitted_psill = 0,
+      fitted_range = 0, practical_range = 0,
+      nugget_sill_ratio = 1, range_hit_max = FALSE,
+      sse = pure_sse,
+      sse_per_pair = pure_sse / max(sum(weights, na.rm = TRUE), 1),
+      nugget_penalty = 1, range_penalty = 0,
+      lag_penalty = mean(
+        experimental_vgm$np < MIN_PAIRS_PER_VARIOGRAM_BIN,
+        na.rm = TRUE
+      ),
+      singular = FALSE, converged = TRUE,
+      fit_method = NA_integer_, n_iterations = NA_integer_,
+      accepted = FALSE, status = "pure_nugget_fallback",
+      diagnostic_flags =
+        "no_valid_structured_candidate;pure_nugget",
+      sse_rank = NA_real_, candidate_score = 1,
+      stringsAsFactors = FALSE
+    )
+    results <- rbind(results, fallback_row)
+    return(list(
+      fitted = pure_vgm,
+      table = results[
+        order(results$candidate_score, results$sse_per_pair),
+        , drop = FALSE
+      ],
+      fallback = "pure_nugget"
+    ))
+  }
+  sse_rank <- if (length(valid) == 1) 0 else
+    (rank(results$sse_per_pair[valid], ties.method = "average") - 1) /
+    (length(valid) - 1)
+  results$sse_rank[valid] <- sse_rank
+  results$candidate_score[valid] <-
+    0.45 * sse_rank +
+    0.25 * results$range_penalty[valid] +
+    0.20 * results$nugget_penalty[valid] +
+    0.10 * results$lag_penalty[valid]
+  best_i <- valid[which.min(results$candidate_score[valid])]
+  list(
     fitted = fit_objects[[best_i]],
-    table = results[order(results$candidate_score, results$sse), ]
-  ))
+    table = results[
+      order(results$candidate_score, results$sse_per_pair),
+      , drop = FALSE
+    ],
+    fallback = NULL
+  )
 }
 
 metric_table <- function(observed, predicted, variance = NULL, model_name = "model", cv_method = "none") {
   ok <- !is.na(observed) & !is.na(predicted)
   n_total <- length(observed)
   n_pred <- sum(ok)
-
   empty_row <- function() {
     data.frame(
       cv_method = cv_method, model = model_name, n_total = n_total,
       n_predicted = 0, n_missing = n_total, ME = NA_real_, RMSE = NA_real_,
       MAE = NA_real_, R2 = NA_real_, NSE = NA_real_, standardized_RMSE = NA_real_,
-      coverage_95 = NA_real_, mean_standardized_error = NA_real_, Pearson = NA_real_,
-      NRMSE_mean = NA_real_, NRMSE_range = NA_real_, RPD = NA_real_, RPIQ = NA_real_,
-      stringsAsFactors = FALSE
+      n_interval = 0L, interval_fraction = 0,
+      coverage_95 = NA_real_, mean_standardized_error = NA_real_,
+      variance_standardized_RMSE = NA_real_, interval_score_95 = NA_real_,
+      Pearson = NA_real_, NRMSE_mean = NA_real_, NRMSE_range = NA_real_,
+      RPD = NA_real_, RPIQ = NA_real_, stringsAsFactors = FALSE
     )
   }
-
   if (n_pred == 0) return(empty_row())
 
   y <- observed[ok]
@@ -399,16 +453,33 @@ metric_table <- function(observed, predicted, variance = NULL, model_name = "mod
   nrmse_range_val <- ifelse(obs_range > 0, rmse_val / obs_range, NA_real_)
   rpd_val <- ifelse(rmse_val > 0, obs_sd / rmse_val, NA_real_)
   rpiq_val <- ifelse(rmse_val > 0, obs_iqr / rmse_val, NA_real_)
-  coverage <- NA_real_
-  mean_std_err <- NA_real_
+  n_interval <- 0L
+  interval_fraction <- 0
+  coverage <- mean_std_err <- variance_std_rmse <- interval_score <- NA_real_
 
   if (!is.null(variance)) {
-    v <- variance[ok]
-    v_ok <- !is.na(v) & v > 0
+    v <- suppressWarnings(as.numeric(variance[ok]))
+    v_ok <- is.finite(v) & v > 0
     if (any(v_ok)) {
+      n_interval <- sum(v_ok)
+      interval_fraction <- n_interval / max(n_pred, 1)
       s <- sqrt(v[v_ok])
-      coverage <- mean(y[v_ok] >= p[v_ok] - 1.96 * s & y[v_ok] <= p[v_ok] + 1.96 * s)
-      mean_std_err <- mean(err[v_ok] / s, na.rm = TRUE)
+      yy <- y[v_ok]
+      pp <- p[v_ok]
+      ee <- err[v_ok]
+      lower <- pp - 1.96 * s
+      upper <- pp + 1.96 * s
+      coverage <- mean(yy >= lower & yy <= upper)
+      z <- ee / s
+      mean_std_err <- mean(z, na.rm = TRUE)
+      variance_std_rmse <- sqrt(mean(z^2, na.rm = TRUE))
+      alpha <- 0.05
+      interval_score <- mean(
+        (upper - lower) +
+          (2 / alpha) * (lower - yy) * (yy < lower) +
+          (2 / alpha) * (yy - upper) * (yy > upper),
+        na.rm = TRUE
+      )
     }
   }
 
@@ -417,12 +488,16 @@ metric_table <- function(observed, predicted, variance = NULL, model_name = "mod
     n_predicted = n_pred, n_missing = n_total - n_pred,
     ME = mean(err, na.rm = TRUE), RMSE = rmse_val, MAE = mae_val,
     R2 = r2_val, NSE = r2_val, standardized_RMSE = std_rmse,
+    n_interval = n_interval, interval_fraction = interval_fraction,
     coverage_95 = coverage, mean_standardized_error = mean_std_err,
+    variance_standardized_RMSE = variance_std_rmse,
+    interval_score_95 = interval_score,
     Pearson = pearson_val, NRMSE_mean = nrmse_mean_val,
     NRMSE_range = nrmse_range_val, RPD = rpd_val, RPIQ = rpiq_val,
     stringsAsFactors = FALSE
   )
 }
+
 practical_range <- function(vgm_obj) {
   params <- get_vgm_params(vgm_obj)
   if (params$model == "Exp") {
@@ -472,71 +547,62 @@ nearest_neighbor_table <- function(points_sf) {
   )
 }
 
-fit_variogram_for_cv <- function(sp_points, formula_obj, values) {
-  exp_try <- suppressWarnings(
-    try(
-      variogram(
-        formula_obj,
-        sp_points,
-        cutoff = VARIOGRAM_CUTOFF,
-        width = VARIOGRAM_WIDTH
-      ),
-      silent = TRUE
-    )
-  )
-
-  if (inherits(exp_try, "try-error") || nrow(exp_try) == 0) {
-    return(NULL)
-  }
+fit_variogram_for_cv <- function(sp_points, formula_obj, values,
+    candidate_models = VARIOGRAM_CANDIDATE_MODELS, allow_fallback = TRUE,
+    cressie = isTRUE(VARIOGRAM_ROBUST_CRESSIE)) {
+  exp_try <- suppressWarnings(try(
+    variogram(
+      formula_obj, sp_points, cutoff = VARIOGRAM_CUTOFF,
+      width = VARIOGRAM_WIDTH, cressie = cressie
+    ),
+    silent = TRUE
+  ))
+  if (inherits(exp_try, "try-error") || nrow(exp_try) == 0) return(NULL)
 
   auto_result <- fit_variogram_auto_select(
-    experimental_vgm = exp_try,
-    residual_values = values
+    experimental_vgm = exp_try, residual_values = values,
+    candidate_models = candidate_models
   )
-
-  if (!is.null(auto_result$fitted)) {
+  if (!is.null(auto_result$fitted) &&
+      !isTRUE(attr(auto_result$fitted, "singular"))) {
     return(auto_result$fitted)
   }
+  if (!isTRUE(allow_fallback)) return(NULL)
 
   value_var <- var(values, na.rm = TRUE)
   if (is.na(value_var) || value_var <= 0) value_var <- 1
-
+  fallback_model <- as.character(candidate_models[1] %||% VARIOGRAM_MODEL)
   init_vgm <- vgm(
-    psill = value_var * 0.8,
-    model = VARIOGRAM_MODEL,
+    psill = value_var * 0.8, model = fallback_model,
     range = min(max(MANUAL_RANGE, VARIOGRAM_RANGE_MIN), VARIOGRAM_RANGE_MAX),
     nugget = value_var * 0.1
   )
-
-  fit_try <- suppressWarnings(try(fit.variogram(exp_try, model = init_vgm), silent = TRUE))
-
-  if (inherits(fit_try, "try-error") ||
-      any(is.na(fit_try$psill)) ||
-      any(is.na(fit_try$range)) ||
+  fit_try <- suppressWarnings(try(
+    fit.variogram(exp_try, model = init_vgm, fit.method = 7),
+    silent = TRUE
+  ))
+  if (inherits(fit_try, "try-error") || isTRUE(attr(fit_try, "singular")) ||
+      any(is.na(fit_try$psill)) || any(is.na(fit_try$range)) ||
       any(fit_try$psill < 0, na.rm = TRUE) ||
       any(fit_try$range < 0, na.rm = TRUE)) {
     return(NULL)
   }
-
-  return(fit_try)
+  fit_try
 }
 
 make_fold_ids <- function(points_sf, method, k, seed) {
-  n <- nrow(points_sf)
-  k <- max(2, min(k, n))
-  set.seed(seed)
-
-  if (method == "random") {
-    return(sample(rep(seq_len(k), length.out = n)))
+  if (method %in% c("buffer", "nndm")) {
+    stop(paste0(
+      method,
+      " uses explicit train/test lists and is supported as CV_OUTER_METHOD, not as a secondary CV_METHODS entry."
+    ))
   }
-
-  if (method == "spatial_kmeans") {
-    xy <- st_coordinates(points_sf)
-    km <- stats::kmeans(scale(xy), centers = k, nstart = 50)
-    return(km$cluster)
-  }
-
-  stop(paste0("Unknown CV method: ", method))
+  plan <- rk_make_cv_plan(
+    points_sf, method, k, seed,
+    block_size = CV_OUTER_BLOCK_SIZE %||% "auto",
+    prediction_raster = if (exists("template_raster")) template_raster else NULL
+  )
+  plan$fold_ids
 }
 
 run_cv_comparison <- function(model_df, points_sf, regression_formula, target_field, cv_method, manual_vgm, target_model_field = target_field, target_transform = "none", log_bias_correction = FALSE) {
@@ -1077,12 +1143,205 @@ log_msg <- function(...) {
   writeBin(charToRaw(paste0(txt, "\n")), con)
 }
 
+scientific_messages <- character(0)
 scientific_warnings <- character(0)
+scientific_hard_failures <- character(0)
 
+add_science_message <- function(message) {
+  scientific_messages <<- unique(c(scientific_messages, message))
+  log_msg("INFO: ", message)
+}
 add_science_warning <- function(message) {
   scientific_warnings <<- unique(c(scientific_warnings, message))
   log_msg("WARNING: ", message)
 }
+add_science_hard_failure <- function(message) {
+  scientific_hard_failures <<- unique(c(scientific_hard_failures, message))
+  log_msg("HARD-FAIL: ", message)
+}
+
+load_target_metadata <- function(path, target_field) {
+  if (is.null(path) || !file.exists(path)) return(list())
+  if (!requireNamespace("yaml", quietly = TRUE)) {
+    stop("TARGET_METADATA_FILE exists but package yaml is not installed.")
+  }
+  root <- yaml::read_yaml(path)
+  targets <- root$targets %||% root
+  metadata <- targets[[target_field]] %||% list()
+  if (!is.list(metadata)) stop("Target metadata entry must be a YAML object.")
+  metadata
+}
+target_metadata_active <- load_target_metadata(
+  TARGET_METADATA_FILE %||% "", TARGET_FIELD)
+TARGET_PROFILE_OVERRIDE <- if (
+    rk_eval_has_metadata_value(target_metadata_active$profile_name)) {
+  as.character(target_metadata_active$profile_name[1])
+} else NULL
+if (length(target_metadata_active) > 0) {
+  add_science_message(paste0(
+    "Đã đọc metadata cho ", TARGET_FIELD,
+    if (rk_eval_has_metadata_value(TARGET_PROFILE_OVERRIDE))
+      paste0("; profile override = ", TARGET_PROFILE_OVERRIDE) else "."
+  ))
+} else {
+  add_science_message(
+    "Chưa có target metadata YAML; profile/classification chỉ được xem là rule nội bộ.")
+}
+point_support_path <- if (exists("POINT_SUPPORT_METADATA_FILE")) {
+  as.character(POINT_SUPPORT_METADATA_FILE %||% "")
+} else {
+  ""
+}
+point_support_inside_raw <- rep(NA, nrow(pts_raw))
+point_support_metadata_loaded <- FALSE
+point_support_manual_raw <- rep(NA_character_, nrow(pts_raw))
+point_support_target_raw <- rep(NA_character_, nrow(pts_raw))
+point_support_sampling_raw <- rep(NA_character_, nrow(pts_raw))
+point_support_include_raw <- rep(NA, nrow(pts_raw))
+point_support_role_raw <- rep(NA_character_, nrow(pts_raw))
+point_support_schema <- "required: code, inside_roi; optional governance: manual_assessment_status, target_population_status, sampling_support_status, include_in_model_development, analysis_role"
+
+parse_inside_roi <- function(x) {
+  value <- tolower(trimws(as.character(x)))
+  out <- rep(NA, length(value))
+  out[value %in% c("true", "t", "1", "yes", "y", "inside", "in")] <- TRUE
+  out[value %in% c("false", "f", "0", "no", "n", "outside", "out")] <- FALSE
+  out
+}
+
+if (nzchar(point_support_path)) {
+  if (!file.exists(point_support_path)) {
+    add_science_warning(paste0(
+      "POINT_SUPPORT_METADATA_FILE không tồn tại: ", point_support_path,
+      ". Không thể thống kê inside/outside ROI trong engine."
+    ))
+  } else {
+    support_df <- read.csv(
+      point_support_path, stringsAsFactors = FALSE, check.names = FALSE)
+    clean_names <- tolower(trimws(names(support_df)))
+    support_code_idx <- match(tolower(CODE_COL), clean_names)
+    if (is.na(support_code_idx)) support_code_idx <- match("code", clean_names)
+    support_inside_idx <- match("inside_roi", clean_names)
+    if (is.na(support_code_idx) || is.na(support_inside_idx)) {
+      add_science_warning(paste0(
+        "POINT_SUPPORT_METADATA_FILE sai schema; cần ", point_support_schema,
+        ". File chỉ dùng cho provenance/QA, không dùng làm target."
+      ))
+    } else {
+      support_code <- trimws(as.character(support_df[[support_code_idx]]))
+      duplicate_support <- duplicated(support_code)
+      if (any(duplicate_support)) {
+        add_science_warning(paste0(
+          "POINT_SUPPORT_METADATA_FILE có code trùng; chỉ dùng bản ghi đầu tiên ",
+          "cho mỗi code."
+        ))
+        support_df <- support_df[!duplicate_support, , drop = FALSE]
+        support_code <- support_code[!duplicate_support]
+      }
+      inside_values <- parse_inside_roi(support_df[[support_inside_idx]])
+      support_value <- function(column) {
+        idx <- match(column, clean_names)
+        if (is.na(idx)) return(rep(NA_character_, nrow(support_df)))
+        value <- trimws(as.character(support_df[[idx]]))
+        value[!nzchar(value)] <- NA_character_
+        value
+      }
+      manual_values <- support_value("manual_assessment_status")
+      target_values <- support_value("target_population_status")
+      sampling_values <- support_value("sampling_support_status")
+      include_values <- parse_inside_roi(
+        support_value("include_in_model_development"))
+      role_values <- support_value("analysis_role")
+      invalid_inside <- !is.na(support_df[[support_inside_idx]]) &
+        nzchar(trimws(as.character(support_df[[support_inside_idx]]))) &
+        is.na(inside_values)
+      if (any(invalid_inside)) {
+        add_science_warning(paste0(
+          sum(invalid_inside),
+          " giá trị inside_roi không hợp lệ; ghi nhận ROI membership = unknown."
+        ))
+      }
+      matched_support <- match(
+        trimws(as.character(pts_raw[[CODE_COL]])), support_code)
+      point_support_inside_raw <- inside_values[matched_support]
+      point_support_manual_raw <- manual_values[matched_support]
+      point_support_target_raw <- target_values[matched_support]
+      point_support_sampling_raw <- sampling_values[matched_support]
+      point_support_include_raw <- include_values[matched_support]
+      point_support_role_raw <- role_values[matched_support]
+      point_support_metadata_loaded <- TRUE
+      if (any(is.na(matched_support))) {
+        add_science_warning(paste0(
+          sum(is.na(matched_support)),
+          " điểm không có bản ghi trong POINT_SUPPORT_METADATA_FILE."
+        ))
+      }
+      add_science_message(paste0(
+        "Đã đọc point-support metadata; inside ROI = ",
+        sum(point_support_inside_raw %in% TRUE), ", outside ROI = ",
+        sum(point_support_inside_raw %in% FALSE),
+        ". ROI membership chỉ mô tả support, không tạo validation set."
+      ))
+    }
+  }
+}
+
+raster_manifest <- data.frame(
+  layer = PREDICTORS,
+  file = unname(RASTER_FILES),
+  type = "continuous",
+  resampling = "bilinear",
+  provenance = "PC raster assumed continuous",
+  stringsAsFactors = FALSE
+)
+if (file.exists(RASTER_MANIFEST_FILE)) {
+  manifest_input <- read.csv(
+    RASTER_MANIFEST_FILE, stringsAsFactors = FALSE, check.names = FALSE)
+  required_manifest <- c("layer", "type", "resampling")
+  missing_manifest <- setdiff(required_manifest, names(manifest_input))
+  if (length(missing_manifest) > 0) {
+    stop(paste0(
+      "Raster manifest thiếu cột: ", paste(missing_manifest, collapse = ", ")))
+  }
+  for (i in seq_len(nrow(raster_manifest))) {
+    hit <- which(
+      manifest_input$layer == raster_manifest$layer[i] |
+        ("file" %in% names(manifest_input) &
+          basename(manifest_input$file) == basename(raster_manifest$file[i]))
+    )
+    if (length(hit) > 0) {
+      row <- manifest_input[hit[1], , drop = FALSE]
+      raster_manifest$type[i] <- tolower(as.character(row$type[1]))
+      raster_manifest$resampling[i] <- tolower(as.character(row$resampling[1]))
+      if ("provenance" %in% names(row)) {
+        raster_manifest$provenance[i] <- as.character(row$provenance[1])
+      }
+    }
+  }
+  add_science_message(paste0(
+    "Đã áp dụng raster manifest: ", RASTER_MANIFEST_FILE))
+} else {
+  add_science_message(
+    "Không có raster manifest; mọi PC*.tif được coi là continuous PCA score và resample bilinear.")
+}
+if (any(!raster_manifest$type %in% c("continuous", "categorical"))) {
+  stop("Raster manifest type must be continuous or categorical.")
+}
+raster_manifest$resampling[raster_manifest$type == "categorical"] <- "near"
+if (any(!raster_manifest$resampling %in% c("bilinear", "near"))) {
+  stop("Raster manifest resampling must be bilinear or near.")
+}
+write.csv(
+  raster_manifest,
+  out_path("01_clean_data", "raster_manifest_used.csv"),
+  row.names = FALSE, fileEncoding = "UTF-8"
+)
+if (any(raster_manifest$type == "categorical")) {
+  add_science_warning(
+    "Có raster categorical: đã dùng nearest-neighbor resampling; cần đảm bảo formula xử lý mã lớp đúng ngữ nghĩa.")
+}
+first_resampling_method <- raster_manifest$resampling[
+  match(names(RASTER_FILES)[1], raster_manifest$layer)]
 
 log_msg("Run name: ", RUN_NAME)
 log_msg("Output folder: ", OUT_DIR)
@@ -1112,7 +1371,13 @@ valid_idx <- !is.na(pts_raw[[LON_COL]]) &
   !is.na(pts_raw[[LAT_COL]]) &
   !is.na(pts_raw[[TARGET_FIELD]])
 
+point_support_inside_valid <- point_support_inside_raw[valid_idx]
 pts_raw <- pts_raw[valid_idx, ]
+point_support_manual_valid <- point_support_manual_raw[valid_idx]
+point_support_target_valid <- point_support_target_raw[valid_idx]
+point_support_sampling_valid <- point_support_sampling_raw[valid_idx]
+point_support_include_valid <- point_support_include_raw[valid_idx]
+point_support_role_valid <- point_support_role_raw[valid_idx]
 
 if (nrow(pts_raw) < 5) {
   stop("Too few valid points after NA filtering. Need at least 5 points.")
@@ -1152,7 +1417,7 @@ if (is.character(OUTPUT_RESOLUTION) && tolower(OUTPUT_RESOLUTION) == "auto") {
   template_raster <- project(
     first_r,
     target_crs,
-    method = "bilinear"
+    method = first_resampling_method
   )
 } else {
   out_res <- suppressWarnings(as.numeric(OUTPUT_RESOLUTION))
@@ -1161,7 +1426,7 @@ if (is.character(OUTPUT_RESOLUTION) && tolower(OUTPUT_RESOLUTION) == "auto") {
     stop("OUTPUT_RESOLUTION must be numeric or 'auto'.")
   }
 
-  first_utm_base <- project(first_r, target_crs, method = "bilinear")
+  first_utm_base <- project(first_r, target_crs, method = first_resampling_method)
 
   base_template <- rast(
     ext(first_utm_base),
@@ -1169,7 +1434,7 @@ if (is.character(OUTPUT_RESOLUTION) && tolower(OUTPUT_RESOLUTION) == "auto") {
     crs = target_crs
   )
 
-  template_raster <- project(first_utm_base, base_template, method = "bilinear")
+  template_raster <- project(first_utm_base, base_template, method = first_resampling_method)
 }
 
 template_res <- res(template_raster)
@@ -1200,10 +1465,13 @@ for (nm in names(RASTER_FILES)) {
 
   r <- r[[1]]
 
+  resampling_method <- raster_manifest$resampling[
+    match(nm, raster_manifest$layer)
+  ]
   r_utm <- project(
     r,
     template_raster,
-    method = "bilinear"
+    method = resampling_method
   )
 
   names(r_utm) <- nm
@@ -1265,7 +1533,143 @@ complete_idx <- complete.cases(model_df_all[, keep_cols])
 
 model_df <- model_df_all[complete_idx, ]
 pts_model_sf <- pts_utm[complete_idx, ]
+point_support_inside_model <- point_support_inside_valid[complete_idx]
+point_support_manual_model <- point_support_manual_valid[complete_idx]
+point_support_target_model <- point_support_target_valid[complete_idx]
+point_support_sampling_model <- point_support_sampling_valid[complete_idx]
+point_support_include_model <- point_support_include_valid[complete_idx]
+point_support_role_model <- point_support_role_valid[complete_idx]
 
+support_status_confirmed <- function(x) {
+  value <- tolower(trimws(as.character(x)))
+  positive <- grepl(
+    "confirm|approv|accept|reviewed|complete|eligible|in.?scope|supported",
+    value
+  )
+  negative <- grepl(
+    "pending|unconfirm|unknown|not.?review|exclude|reject|sensitivity",
+    value
+  )
+  !is.na(value) & nzchar(value) & positive & !negative
+}
+outside_model_idx <- which(point_support_inside_model %in% FALSE)
+manual_confirmed <- support_status_confirmed(point_support_manual_model)
+target_confirmed <- support_status_confirmed(point_support_target_model)
+sampling_confirmed <- support_status_confirmed(point_support_sampling_model)
+role_value <- tolower(trimws(as.character(point_support_role_model)))
+role_primary <- rk_eval_primary_model_role(role_value)
+role_validation <- !is.na(role_value) &
+  grepl("validation|holdout|test", role_value)
+role_sensitivity <- !is.na(role_value) &
+  grepl("sensitivity", role_value)
+outside_review_ok <- manual_confirmed & target_confirmed &
+  sampling_confirmed & (point_support_include_model %in% TRUE) &
+  role_primary
+outside_pending_idx <- outside_model_idx[
+  !outside_review_ok[outside_model_idx]]
+outside_include_false_idx <- outside_model_idx[
+  point_support_include_model[outside_model_idx] %in% FALSE]
+outside_validation_label_idx <- outside_model_idx[
+  role_validation[outside_model_idx]]
+outside_sensitivity_idx <- outside_model_idx[
+  role_sensitivity[outside_model_idx]]
+outside_review_gate_passed <- length(outside_pending_idx) == 0
+roi_known <- any(!is.na(point_support_inside_model))
+n_inside_roi_model <- if (roi_known) {
+  sum(point_support_inside_model %in% TRUE)
+} else NA_integer_
+n_outside_roi_model <- if (roi_known) {
+  sum(point_support_inside_model %in% FALSE)
+} else NA_integer_
+point_support_summary <- list(
+  metadata_available = point_support_metadata_loaded,
+  metadata_file = if (point_support_metadata_loaded) {
+    normalizePath(point_support_path, winslash = "/", mustWork = FALSE)
+  } else {
+    NA_character_
+  },
+  metadata_schema = point_support_schema,
+  n_model_points = nrow(model_df),
+  n_inside_roi_model = n_inside_roi_model,
+  n_outside_roi_model = n_outside_roi_model,
+  n_roi_membership_unknown = sum(is.na(point_support_inside_model)),
+  model_point_role = "model_development_training_and_outer_cv",
+  outside_roi_model_policy =
+    "included_when_target_and_all_model_covariates_are_complete",
+  outside_roi_points_are_validation = FALSE,
+  independent_field_validation_sample = FALSE,
+  roi_membership_role = "provenance_and_target_population_diagnostic_only",
+  prediction_domain =
+    "complete_covariate_raster_support; final_ROI_mask_applied_by_project_workflow",
+  aoa_reference_points =
+    "all_model_development_points_with_complete_target_and_covariates",
+  outside_review_gate_passed = outside_review_gate_passed,
+  n_outside_pending_review = length(outside_pending_idx),
+  n_outside_include_false_in_primary = length(outside_include_false_idx),
+  n_outside_labeled_validation = length(outside_validation_label_idx),
+  n_outside_sensitivity_role_in_primary = length(outside_sensitivity_idx),
+  primary_product_eligible = outside_review_gate_passed,
+  sensitivity_analysis_eligible = TRUE,
+  governance_policy =
+    "outside points remain model-development only; pending/false flags force DRAFT and block auto-ACCEPT"
+)
+point_support_model_table <- data.frame(
+  code = as.character(model_df[[CODE_COL]]),
+  inside_roi = point_support_inside_model,
+  manual_assessment_status = point_support_manual_model,
+  target_population_status = point_support_target_model,
+  sampling_support_status = point_support_sampling_model,
+  include_in_model_development = point_support_include_model,
+  declared_analysis_role = point_support_role_model,
+  sample_role = "model_development",
+  used_as_independent_validation = FALSE,
+  stringsAsFactors = FALSE
+)
+write.csv(
+  point_support_model_table,
+  out_path("01_clean_data",
+    paste0("model_point_support_", TARGET_NAME, ".csv")),
+  row.names = FALSE, fileEncoding = "UTF-8"
+)
+if (is.finite(n_outside_roi_model) && n_outside_roi_model > 0) {
+  add_science_message(paste0(
+    n_outside_roi_model,
+    " điểm ngoài ROI được giữ làm model-development vì đủ target/covariate; ",
+    "không được gọi là validation points."
+  ))
+}
+if (length(outside_pending_idx) > 0) {
+  add_science_hard_failure(paste0(
+    length(outside_pending_idx),
+    " điểm ngoài ROI trong primary input chưa đạt manual/target-population/",
+    "sampling-support/include/analysis-role gate. Continuous model vẫn chạy ",
+    "để QA/sensitivity nhưng product phải DRAFT_PENDING_OUTSIDE_REVIEW."
+  ))
+}
+if (length(outside_include_false_idx) > 0) {
+  add_science_hard_failure(paste0(
+    length(outside_include_false_idx),
+    " điểm ngoài ROI có include_in_model_development=false nhưng vẫn xuất hiện ",
+    "trong primary input; không được auto-ACCEPT làm final candidate."
+  ))
+  add_science_warning(
+    "Các điểm include=false chỉ đủ điều kiện cho sensitivity analysis cho tới khi được phê duyệt lại."
+  )
+}
+if (length(outside_validation_label_idx) > 0) {
+  add_science_hard_failure(paste0(
+    length(outside_validation_label_idx),
+    " điểm ngoài ROI mang analysis_role validation/holdout/test. Engine bỏ ngữ ",
+    "nghĩa validation: các điểm này vẫn không phải independent field validation."
+  ))
+}
+if (length(outside_sensitivity_idx) > 0) {
+  add_science_warning(paste0(
+    length(outside_sensitivity_idx),
+    " điểm ngoài ROI có sensitivity role nhưng nằm trong primary input; ",
+    "primary product bị chặn, chỉ sensitivity candidate có thể được xem xét."
+  ))
+}
 write.csv(
   model_df,
   out_path("01_clean_data", paste0("clean_points_", TARGET_NAME, ".csv")),
@@ -1283,6 +1687,46 @@ sample_max <- max(model_df[[TARGET_FIELD]], na.rm = TRUE)
 
 log_msg("Sample min: ", round(sample_min, 4))
 log_msg("Sample max: ", round(sample_max, 4))
+
+sample_xy <- st_coordinates(pts_model_sf)
+coordinate_key <- paste(round(sample_xy[, 1], 3), round(sample_xy[, 2], 3), sep = "_")
+duplicate_keys <- unique(coordinate_key[duplicated(coordinate_key)])
+if (length(duplicate_keys) > 0) {
+  duplicate_rows <- do.call(rbind, lapply(duplicate_keys, function(key) {
+    idx <- which(coordinate_key == key)
+    data.frame(
+      coordinate_key = key,
+      row_index = idx,
+      sample_code = if (CODE_COL %in% names(model_df))
+        as.character(model_df[[CODE_COL]][idx]) else as.character(idx),
+      target_value = model_df[[TARGET_FIELD]][idx],
+      stringsAsFactors = FALSE
+    )
+  }))
+  write.csv(
+    duplicate_rows,
+    out_path("01_clean_data",
+      paste0("duplicate_coordinates_", TARGET_NAME, ".csv")),
+    row.names = FALSE, fileEncoding = "UTF-8"
+  )
+  conflicting_keys <- vapply(duplicate_keys, function(key) {
+    values <- model_df[[TARGET_FIELD]][coordinate_key == key]
+    values <- values[is.finite(values)]
+    length(values) > 1 && diff(range(values)) >
+      1e-8 * max(1, max(abs(values)))
+  }, logical(1))
+  if (any(conflicting_keys)) {
+    message <- paste0(
+      "Có ", sum(conflicting_keys),
+      " tọa độ trùng nhưng giá trị ", TARGET_FIELD,
+      " xung đột và không có metadata replicate. Pipeline dừng; không jitter hoặc gộp âm thầm.")
+    add_science_hard_failure(message)
+    if (identical(DUPLICATE_COORDINATE_POLICY, "stop_conflicts")) stop(message)
+  } else {
+    add_science_warning(
+      "Có tọa độ trùng với giá trị giống nhau; cần khai báo laboratory/field replicate trước khi phân tích chính thức.")
+  }
+}
 
 target_transform_info <- resolve_target_transform(TARGET_FIELD, model_df[[TARGET_FIELD]])
 TARGET_TRANSFORM_ACTIVE <- target_transform_info$selected
@@ -1348,7 +1792,123 @@ if (is.null(REGRESSION_FORMULA)) {
 log_msg("Regression formula: ", deparse(regression_formula))
 log_msg("Regression target scale: ", ifelse(identical(TARGET_TRANSFORM_ACTIVE, "none"), "original", TARGET_TRANSFORM_ACTIVE))
 
+n_regression_predictors <- length(attr(stats::terms(regression_formula), "term.labels"))
+samples_per_predictor <- nrow(model_df) / max(n_regression_predictors, 1)
+if (samples_per_predictor < REGRESSION_MIN_SAMPLES_PER_PREDICTOR_HARD_FAIL) {
+  add_science_hard_failure(paste0(
+    "Tỷ lệ n/p = ", round(samples_per_predictor, 2),
+    " < ", REGRESSION_MIN_SAMPLES_PER_PREDICTOR_HARD_FAIL,
+    "; trend model có nguy cơ overfit nghiêm trọng và không được auto-ACCEPT."
+  ))
+} else if (samples_per_predictor < REGRESSION_MIN_SAMPLES_PER_PREDICTOR_WARNING) {
+  add_science_warning(paste0(
+    "Tỷ lệ n/p = ", round(samples_per_predictor, 2),
+    " < ", REGRESSION_MIN_SAMPLES_PER_PREDICTOR_WARNING,
+    "; hệ số trend có thể không ổn định."
+  ))
+}
+
 reg_model <- lm(regression_formula, data = model_df)
+model_matrix <- stats::model.matrix(reg_model)
+condition_number <- tryCatch(kappa(model_matrix, exact = TRUE),
+  error = function(e) NA_real_)
+leverage <- stats::hatvalues(reg_model)
+cooks <- stats::cooks.distance(reg_model)
+studentized <- tryCatch(stats::rstudent(reg_model),
+  error = function(e) rep(NA_real_, nrow(model_df)))
+bp_test <- if (requireNamespace("lmtest", quietly = TRUE)) {
+  suppressWarnings(try(lmtest::bptest(reg_model), silent = TRUE))
+} else {
+  NULL
+}
+bp_statistic <- if (!is.null(bp_test) &&
+    !inherits(bp_test, "try-error")) {
+  suppressWarnings(as.numeric(bp_test$statistic))
+} else {
+  NA_real_
+}
+bp_df <- if (!is.null(bp_test) && !inherits(bp_test, "try-error")) {
+  suppressWarnings(as.numeric(bp_test$parameter))
+} else {
+  NA_real_
+}
+bp_p_value <- if (!is.null(bp_test) &&
+    !inherits(bp_test, "try-error")) {
+  suppressWarnings(as.numeric(bp_test$p.value))
+} else {
+  NA_real_
+}
+residual_for_normality <- stats::residuals(reg_model)
+shapiro_p_value <- if (length(residual_for_normality) >= 3 &&
+    length(residual_for_normality) <= 5000) {
+  tryCatch(
+    stats::shapiro.test(residual_for_normality)$p.value,
+    error = function(e) NA_real_
+  )
+} else {
+  NA_real_
+}
+regression_influence <- data.frame(
+  row_index = seq_len(nrow(model_df)),
+  sample_code = if (CODE_COL %in% names(model_df))
+    as.character(model_df[[CODE_COL]]) else as.character(seq_len(nrow(model_df))),
+  fitted_model_scale = stats::fitted(reg_model),
+  residual_model_scale = stats::residuals(reg_model),
+  leverage = leverage, cooks_distance = cooks,
+  studentized_residual = studentized, stringsAsFactors = FALSE
+)
+write.csv(
+  regression_influence,
+  out_path("02_regression_model",
+    paste0("regression_influence_", TARGET_NAME, ".csv")),
+  row.names = FALSE, fileEncoding = "UTF-8"
+)
+regression_diagnostics <- data.frame(
+  n_samples = nrow(model_df), n_predictors = n_regression_predictors,
+  samples_per_predictor = samples_per_predictor,
+  model_matrix_rank = reg_model$rank,
+  condition_number = condition_number,
+  breusch_pagan_statistic = bp_statistic,
+  breusch_pagan_df = bp_df,
+  breusch_pagan_p_value = bp_p_value,
+  shapiro_wilk_p_value = shapiro_p_value,
+  high_leverage_count = sum(leverage > 2 * mean(leverage), na.rm = TRUE),
+  influential_cooks_count = sum(cooks > 4 / nrow(model_df), na.rm = TRUE),
+  stringsAsFactors = FALSE
+)
+write.csv(
+  regression_diagnostics,
+  out_path("02_regression_model",
+    paste0("regression_diagnostics_", TARGET_NAME, ".csv")),
+  row.names = FALSE, fileEncoding = "UTF-8"
+)
+if (is.finite(condition_number) && condition_number > 30) {
+  add_science_warning(paste0(
+    "Condition number = ", round(condition_number, 1),
+    " cho thấy thiết kế hồi quy kém ổn định/đa cộng tuyến."
+  ))
+}
+if (sum(cooks > 4 / nrow(model_df), na.rm = TRUE) >
+    max(1, 0.05 * nrow(model_df))) {
+  add_science_warning(
+    paste0(
+      "Nhiều điểm có Cook's distance lớn; cần kiểm tra ảnh hưởng điểm ",
+      "và sai số phòng thí nghiệm."
+    )
+  )
+}
+if (is.finite(bp_p_value) && bp_p_value < 0.05) {
+  add_science_warning(paste0(
+    "Breusch-Pagan p = ", signif(bp_p_value, 3),
+    " cho thấy phương sai phần dư trend có thể không đồng nhất."
+  ))
+}
+if (is.finite(shapiro_p_value) && shapiro_p_value < 0.05) {
+  add_science_warning(paste0(
+    "Shapiro-Wilk p = ", signif(shapiro_p_value, 3),
+    " cho thấy phần dư trend lệch chuẩn; cần xem histogram, outlier và transform."
+  ))
+}
 
 model_df$reg_pred_model <- as.numeric(predict(reg_model, newdata = model_df))
 model_df$reg_pred <- rk_back_transform_values(model_df$reg_pred_model, TARGET_TRANSFORM_ACTIVE)
@@ -1483,6 +2043,132 @@ write.csv(
   row.names = FALSE
 )
 
+robust_vgm <- suppressWarnings(try(variogram(
+  residual ~ 1, pts_sp, cutoff = VARIOGRAM_CUTOFF,
+  width = VARIOGRAM_WIDTH, cressie = TRUE
+), silent = TRUE))
+robust_relative_difference <- NA_real_
+if (!inherits(robust_vgm, "try-error") && nrow(robust_vgm) > 0) {
+  write.csv(
+    robust_vgm,
+    out_path("03_variogram",
+      paste0("experimental_variogram_cressie_", TARGET_NAME, ".csv")),
+    row.names = FALSE, fileEncoding = "UTF-8"
+  )
+  matched <- merge(
+    experimental_vgm[, c("dist", "gamma")],
+    robust_vgm[, c("dist", "gamma")],
+    by = "dist", suffixes = c("_classical", "_robust")
+  )
+  if (nrow(matched) > 0) {
+    scale_gamma <- stats::median(
+      abs(matched$gamma_classical), na.rm = TRUE)
+    if (is.finite(scale_gamma) && scale_gamma > 0) {
+      robust_relative_difference <- stats::median(
+        abs(matched$gamma_classical - matched$gamma_robust),
+        na.rm = TRUE) / scale_gamma
+    }
+  }
+}
+
+if (isTRUE(VARIOGRAM_EXPORT_CLOUD)) {
+  variogram_cloud <- suppressWarnings(try(variogram(
+    residual ~ 1, pts_sp, cutoff = VARIOGRAM_CUTOFF, cloud = TRUE
+  ), silent = TRUE))
+  if (!inherits(variogram_cloud, "try-error") && nrow(variogram_cloud) > 0) {
+    write.csv(
+      variogram_cloud,
+      out_path("03_variogram",
+        paste0("variogram_cloud_", TARGET_NAME, ".csv")),
+      row.names = FALSE, fileEncoding = "UTF-8"
+    )
+  }
+}
+
+directional_vgm <- suppressWarnings(try(variogram(
+  residual ~ 1, pts_sp, cutoff = VARIOGRAM_CUTOFF,
+  width = VARIOGRAM_WIDTH, alpha = VARIOGRAM_DIRECTIONAL_ALPHAS,
+  tol.hor = VARIOGRAM_DIRECTIONAL_TOLERANCE
+), silent = TRUE))
+directional_ranges <- data.frame()
+anisotropy_ratio <- NA_real_
+anisotropy_major_direction <- NA_real_
+if (!inherits(directional_vgm, "try-error") && nrow(directional_vgm) > 0) {
+  write.csv(
+    directional_vgm,
+    out_path("03_variogram",
+      paste0("directional_variogram_", TARGET_NAME, ".csv")),
+    row.names = FALSE, fileEncoding = "UTF-8"
+  )
+  directional_rows <- lapply(VARIOGRAM_DIRECTIONAL_ALPHAS, function(alpha) {
+    z <- directional_vgm[
+      abs(directional_vgm$dir.hor - alpha) < 1e-8, , drop = FALSE]
+    if (nrow(z) < 3) {
+      return(data.frame(
+        direction = alpha, n_lags = nrow(z), model = NA_character_,
+        range = NA_real_, practical_range = NA_real_,
+        singular = NA, status = "insufficient_lags"))
+    }
+    fit <- fit_variogram_auto_select(
+      z, model_df$residual,
+      candidate_models = VARIOGRAM_CANDIDATE_MODELS)
+    if (is.null(fit$fitted)) {
+      return(data.frame(
+        direction = alpha, n_lags = nrow(z), model = NA_character_,
+        range = NA_real_, practical_range = NA_real_,
+        singular = NA, status = "no_valid_fit"))
+    }
+    params <- get_vgm_params(fit$fitted)
+    data.frame(
+      direction = alpha, n_lags = nrow(z), model = params$model,
+      range = params$range,
+      practical_range = variogram_practical_range(params$model, params$range),
+      singular = isTRUE(attr(fit$fitted, "singular")), status = "ok")
+  })
+  directional_ranges <- do.call(rbind, directional_rows)
+  write.csv(
+    directional_ranges,
+    out_path("03_variogram",
+      paste0("directional_range_diagnostics_", TARGET_NAME, ".csv")),
+    row.names = FALSE, fileEncoding = "UTF-8"
+  )
+  valid_direction <- is.finite(directional_ranges$practical_range) &
+    directional_ranges$practical_range > 0 & !directional_ranges$singular
+  if (sum(valid_direction) >= 2) {
+    ranges <- directional_ranges$practical_range[valid_direction]
+    anisotropy_ratio <- max(ranges) / min(ranges)
+    anisotropy_major_direction <- directional_ranges$direction[
+      valid_direction][which.max(ranges)]
+    if (anisotropy_ratio >= ANISOTROPY_RATIO_WARNING) {
+      add_science_warning(paste0(
+        "Directional variogram cho range ratio = ",
+        round(anisotropy_ratio, 2), " (hướng liên tục lớn nhất ",
+        anisotropy_major_direction,
+        "°). Cần xem anisotropy trước khi dùng mô hình đẳng hướng."
+      ))
+    }
+  }
+
+  plot_file <- out_path("03_variogram",
+    paste0("directional_variogram_", TARGET_NAME, ".png"))
+  png(plot_file, width = 1200, height = 900)
+  colors <- c("#1f77b4", "#d62728", "#2ca02c", "#9467bd")
+  plot(NA, xlim = range(directional_vgm$dist, na.rm = TRUE),
+    ylim = range(directional_vgm$gamma, na.rm = TRUE),
+    xlab = "Distance (m)", ylab = "Semivariance",
+    main = paste("Directional residual variograms -", TARGET_FIELD))
+  for (i in seq_along(VARIOGRAM_DIRECTIONAL_ALPHAS)) {
+    alpha <- VARIOGRAM_DIRECTIONAL_ALPHAS[i]
+    z <- directional_vgm[
+      abs(directional_vgm$dir.hor - alpha) < 1e-8, , drop = FALSE]
+    points(z$dist, z$gamma, type = "b", pch = 19, col = colors[i])
+  }
+  legend("bottomright",
+    legend = paste0(VARIOGRAM_DIRECTIONAL_ALPHAS, "°"),
+    col = colors, pch = 19, lty = 1, bty = "n")
+  save_plot_done(plot_file)
+}
+
 if (nrow(experimental_vgm) < MIN_VARIOGRAM_BINS_WARNING) {
   add_science_warning(paste0(
     "Experimental variogram has only ", nrow(experimental_vgm), " bins; fitted range/sill may be unstable."
@@ -1506,6 +2192,7 @@ manual_vgm <- vgm(
 
 candidate_table <- data.frame()
 suggested_vgm <- NULL
+variogram_auto_fallback <- NULL
 
 if (isTRUE(EXPORT_VARIogram_SUGGESTIONS) || VARIOGRAM_MODE == "auto_select") {
   log_msg("Creating constrained variogram suggestions...")
@@ -1517,6 +2204,7 @@ if (isTRUE(EXPORT_VARIogram_SUGGESTIONS) || VARIOGRAM_MODE == "auto_select") {
 
   suggested_vgm <- auto_result$fitted
   candidate_table <- auto_result$table
+  variogram_auto_fallback <- auto_result$fallback %||% NULL
 
   if (nrow(candidate_table) > 0) {
     write.csv(
@@ -1538,11 +2226,20 @@ if (VARIOGRAM_MODE == "manual") {
 } else if (VARIOGRAM_MODE == "auto_select") {
   log_msg("Variogram mode: auto_select")
   if (is.null(suggested_vgm)) {
-    log_msg("auto_select lỗi. Dùng lại variogram thủ công.")
-    fitted_vgm <- manual_vgm
+    log_msg("auto_select không trả về mô hình; dùng pure-nugget an toàn.")
+    fitted_vgm <- make_pure_nugget_variogram(
+      model_df$residual, "auto_select_returned_null")
+    variogram_auto_fallback <- "pure_nugget"
   } else {
-    log_msg("Dùng variogram tự động có ràng buộc tốt nhất cho kriging.")
     fitted_vgm <- suggested_vgm
+    if (identical(variogram_auto_fallback, "pure_nugget")) {
+      log_msg(paste0(
+        "Không có candidate variogram có cấu trúc hợp lệ; ",
+        "dùng pure nugget và không krige phần dư."
+      ))
+    } else {
+      log_msg("Dùng variogram tự động có ràng buộc tốt nhất cho kriging.")
+    }
   }
 } else if (VARIOGRAM_MODE == "auto") {
   log_msg("Variogram mode: auto")
@@ -1551,14 +2248,23 @@ if (VARIOGRAM_MODE == "manual") {
   )
 
   if (inherits(fitted_vgm_try, "try-error")) {
-    log_msg("Fit variogram tự động lỗi. Dùng lại variogram thủ công.")
-    fitted_vgm <- manual_vgm
+    log_msg("Fit variogram tự động lỗi; dùng pure-nugget an toàn.")
+    fitted_vgm <- make_pure_nugget_variogram(
+      model_df$residual, "auto_fit_failed")
+    variogram_auto_fallback <- "pure_nugget"
   } else {
     fitted_vgm <- fitted_vgm_try
-    if (any(fitted_vgm$psill < 0, na.rm = TRUE) ||
+    if (isTRUE(attr(fitted_vgm, "singular"))) {
+      log_msg("Auto fit singular; dùng pure-nugget an toàn.")
+      fitted_vgm <- make_pure_nugget_variogram(
+        model_df$residual, "auto_fit_singular")
+      variogram_auto_fallback <- "pure_nugget"
+    } else if (any(fitted_vgm$psill < 0, na.rm = TRUE) ||
         any(fitted_vgm$range < 0, na.rm = TRUE)) {
-      log_msg("Auto fit tạo thông số âm. Dùng lại variogram thủ công.")
-      fitted_vgm <- manual_vgm
+      log_msg("Auto fit tạo thông số âm; dùng pure-nugget an toàn.")
+      fitted_vgm <- make_pure_nugget_variogram(
+        model_df$residual, "auto_fit_negative_parameters")
+      variogram_auto_fallback <- "pure_nugget"
     }
   }
 } else {
@@ -1566,6 +2272,32 @@ if (VARIOGRAM_MODE == "manual") {
 }
 
 fitted_vgm_params <- get_vgm_params(fitted_vgm)
+fitted_vgm_singular <- isTRUE(attr(fitted_vgm, "singular"))
+fitted_vgm_pure_nugget <- is_pure_nugget_variogram(fitted_vgm)
+if (fitted_vgm_pure_nugget) {
+  add_science_message(paste0(
+    "Không tìm thấy cấu trúc không gian phần dư đáng tin cậy; ",
+    "variogram cuối là pure nugget."
+  ))
+}
+if (fitted_vgm_singular) {
+  add_science_hard_failure(
+    "Final variogram fit is singular; output map must not be auto-accepted.")
+}
+if (is.finite(robust_relative_difference) &&
+    robust_relative_difference > 0.30) {
+  add_science_warning(paste0(
+    "Classical và Cressie variogram khác nhau ",
+    round(100 * robust_relative_difference, 1),
+    "% theo median relative difference; cần kiểm tra outlier/support."
+  ))
+}
+if (is.finite(anisotropy_ratio) &&
+    anisotropy_ratio >= ANISOTROPY_RATIO_MANUAL_REVIEW) {
+  add_science_hard_failure(
+    "Anisotropy mạnh nhưng final variogram vẫn đẳng hướng; cần manual review.")
+}
+
 fitted_practical_range <- practical_range(fitted_vgm)
 fitted_total_sill <- fitted_vgm_params$nugget + fitted_vgm_params$psill
 nugget_sill_ratio <- ifelse(fitted_total_sill > 0, fitted_vgm_params$nugget / fitted_total_sill, NA_real_)
@@ -1579,10 +2311,13 @@ if (!is.na(fitted_practical_range) && fitted_practical_range > VARIOGRAM_CUTOFF 
   ))
 }
 
-if (!is.na(nugget_sill_ratio) && nugget_sill_ratio > MAX_NUGGET_SILL_RATIO_WARNING) {
-  add_science_warning(paste0(
-    "Tỷ lệ nugget/sill cao (", round(nugget_sill_ratio, 3), "); tính liên tục không gian của phần dư yếu."
-  ))
+if (!is.na(nugget_sill_ratio) &&
+    nugget_sill_ratio > MAX_NUGGET_SILL_RATIO_WARNING) {
+  log_msg(
+    "Variogram diagnostic: nugget/sill = ",
+    round(nugget_sill_ratio, 3),
+    "; residual spatial continuity is weak."
+  )
 }
 
 capture.output(
@@ -1622,7 +2357,7 @@ if (exists("AUTO_NEIGHBORS") && isTRUE(AUTO_NEIGHBORS)) {
     manual_vgm = fitted_vgm,
     target_model_field = MODEL_TARGET_FIELD,
     target_transform = TARGET_TRANSFORM_ACTIVE,
-    log_bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE
+    log_bias_correction = FALSE
   )
 
   if (!is.null(neighbor_tuning$table) && nrow(neighbor_tuning$table) > 0) {
@@ -1648,143 +2383,352 @@ cv_summary <- data.frame()
 cv_predictions <- data.frame()
 cv_folds <- data.frame()
 cv_rmse_plot_file <- NA_character_
+nested_cv_result <- NULL
+cv_validation_metadata <- list(
+  method = "none", strict_outer_cv = FALSE, outer_repeats = 0L,
+  tuning_uses_outer_test = NA,
+  validation_design = "no_strict_outer_held_out_evaluation",
+  validation_task = "internal_model_performance_estimation",
+  independent_field_validation = FALSE,
+  sample_role = "model_development"
+)
+
+bind_rows_fill <- function(items) {
+  items <- Filter(function(x) is.data.frame(x) && nrow(x) > 0, items)
+  if (length(items) == 0) return(data.frame())
+  all_names <- unique(unlist(lapply(items, names), use.names = FALSE))
+  items <- lapply(items, function(x) {
+    missing <- setdiff(all_names, names(x))
+    for (nm in missing) x[[nm]] <- NA
+    x[, all_names, drop = FALSE]
+  })
+  do.call(rbind, items)
+}
 
 if (isTRUE(RUN_CROSS_VALIDATION)) {
   log_msg("\n[8] Cross-validation and model comparison...")
 
-  cv_results <- list()
-  for (cv_method in CV_METHODS) {
-    log_msg("Running CV method: ", cv_method)
-    cv_try <- try(
-      run_cv_comparison(
+  if (identical(tolower(CV_EVALUATION_MODE %||% "nested_spatial"), "nested_spatial")) {
+    log_msg("Running leakage-resistant nested spatial CV: ",
+      CV_OUTER_FOLDS, " outer folds x ", CV_OUTER_REPEATS, " repeats.")
+    nested_try <- try(
+      rk_nested_spatial_cv(
         model_df = model_df,
         points_sf = pts_model_sf,
         regression_formula = regression_formula,
         target_field = TARGET_FIELD,
-        cv_method = cv_method,
-        manual_vgm = fitted_vgm,
         target_model_field = MODEL_TARGET_FIELD,
-        target_transform = TARGET_TRANSFORM_ACTIVE,
-        log_bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE
+        manual_vgm = fitted_vgm,
+        prediction_raster = template_raster
       ),
       silent = TRUE
     )
-
-    if (inherits(cv_try, "try-error")) {
-      add_science_warning(paste0("Cross-validation lỗi với phương pháp ", cv_method, "."))
-      next
+    if (inherits(nested_try, "try-error")) {
+      add_science_warning(paste0(
+        "Nested spatial CV failed; no outer held-out performance estimate is available: ",
+        as.character(nested_try)
+      ))
+    } else {
+      nested_cv_result <- nested_try
+      cv_summary <- nested_try$summary
+      cv_predictions <- nested_try$predictions
+      cv_folds <- nested_try$folds
+      cv_validation_metadata <- utils::modifyList(nested_try$metadata, list(
+        validation_design = "nested_spatial_cv_outer_held_out",
+        validation_task = "internal_model_performance_estimation",
+        independent_field_validation = FALSE,
+        sample_role = "model_development"
+      ))
+      write.csv(
+        nested_try$repeat_metrics,
+        out_path("06_report", "tables",
+          paste0("nested_cv_repeat_metrics_", TARGET_NAME, ".csv")),
+        row.names = FALSE
+      )
+      write.csv(
+        nested_try$stability |> as.data.frame(),
+        out_path("06_report", "tables",
+          paste0("nested_cv_stability_", TARGET_NAME, ".csv")),
+        row.names = FALSE
+      )
+      write.csv(
+        nested_try$tuning,
+        out_path("06_report", "tables",
+          paste0("nested_cv_inner_tuning_", TARGET_NAME, ".csv")),
+        row.names = FALSE
+      )
+      if (isTRUE(EXPORT_RAW_CV_TABLES)) {
+        write.csv(
+          nested_try$raw_predictions,
+          out_path("06_report", "tables",
+            paste0("nested_cv_raw_predictions_", TARGET_NAME, ".csv")),
+          row.names = FALSE
+        )
+      }
+      if (is.finite(nested_try$stability$inner_tuning_fallback_fraction) &&
+          nested_try$stability$inner_tuning_fallback_fraction > 0) {
+        add_science_warning(paste0(
+          "Inner tuning phải fallback trong ",
+          round(100 * nested_try$stability$inner_tuning_fallback_fraction, 1),
+          "% outer folds; cần xem bảng nested_cv_inner_tuning."
+        ))
+        if (nested_try$stability$inner_tuning_fallback_fraction >= 0.50) {
+          add_science_hard_failure(
+            "Ít nhất một nửa outer folds không tìm được inner candidate ổn định.")
+        }
+      }
+      if (is.finite(nested_try$stability$rk_better_than_regression_fraction) &&
+          nested_try$stability$rk_better_than_regression_fraction < 0.80) {
+        log_msg(
+          "Nested CV diagnostic: RK better than regression-only in ",
+          round(100 * nested_try$stability$rk_better_than_regression_fraction, 1),
+          "% of outer repeats."
+        )
+      }
+      log_msg("Nested spatial CV completed. Median repeat RMSE: ",
+        round(nested_try$stability$median_rmse, 4),
+        "; IQR: ", round(nested_try$stability$iqr_rmse, 4))
     }
-
-    cv_results[[cv_method]] <- cv_try
   }
 
-  if (length(cv_results) > 0) {
-    cv_summary <- do.call(rbind, lapply(cv_results, function(x) x$summary))
-    cv_predictions <- do.call(rbind, lapply(cv_results, function(x) x$predictions))
-    cv_folds <- do.call(rbind, lapply(cv_results, function(x) x$folds))
+  secondary_results <- list()
+  for (cv_method in CV_METHODS) {
+    log_msg("Running secondary diagnostic CV method: ", cv_method)
+    cv_try <- try(
+      run_cv_comparison(
+        model_df = model_df, points_sf = pts_model_sf,
+        regression_formula = regression_formula, target_field = TARGET_FIELD,
+        cv_method = cv_method, manual_vgm = fitted_vgm,
+        target_model_field = MODEL_TARGET_FIELD,
+        target_transform = TARGET_TRANSFORM_ACTIVE,
+        log_bias_correction = FALSE
+      ),
+      silent = TRUE
+    )
+    if (inherits(cv_try, "try-error")) {
+      add_science_warning(paste0(
+        "Cross-validation chẩn đoán lỗi với phương pháp ", cv_method, "."))
+      next
+    }
+    cv_try$summary$evaluation_role <- "secondary_diagnostic"
+    secondary_results[[cv_method]] <- cv_try
+  }
 
+  if (length(secondary_results) > 0) {
+    secondary_summary <- bind_rows_fill(lapply(secondary_results, function(x) x$summary))
+    secondary_predictions <- bind_rows_fill(lapply(secondary_results, function(x) x$predictions))
+    secondary_folds <- bind_rows_fill(lapply(secondary_results, function(x) x$folds))
+    cv_summary <- bind_rows_fill(list(cv_summary, secondary_summary))
+    cv_predictions <- bind_rows_fill(list(cv_predictions, secondary_predictions))
+    cv_folds <- bind_rows_fill(list(cv_folds, secondary_folds))
+  }
+
+  if (nrow(cv_summary) > 0) {
     if (isTRUE(EXPORT_RAW_CV_TABLES)) {
       write.csv(
         cv_summary,
-        out_path("06_report", "tables", paste0("cv_model_comparison_raw_", TARGET_NAME, ".csv")),
+        out_path("06_report", "tables",
+          paste0("cv_model_comparison_raw_", TARGET_NAME, ".csv")),
         row.names = FALSE
       )
-
       write.csv(
         cv_predictions,
-        out_path("06_report", "tables", paste0("cv_predictions_raw_", TARGET_NAME, ".csv")),
+        out_path("06_report", "tables",
+          paste0("cv_predictions_raw_", TARGET_NAME, ".csv")),
         row.names = FALSE
       )
     }
-
     write.csv(
       cv_folds,
-      out_path("06_report", "tables", paste0("cv_fold_diagnostics_", TARGET_NAME, ".csv")),
+      out_path("06_report", "tables",
+        paste0("cv_fold_diagnostics_", TARGET_NAME, ".csv")),
       row.names = FALSE
     )
-
-    log_msg("Đã lưu bảng so sánh mô hình CV.")
-
-    cv_plot_rows <- cv_summary[!is.na(cv_summary$RMSE), , drop = FALSE]
+    cv_plot_rows <- cv_summary[
+      !is.na(cv_summary$RMSE) &
+        (is.na(cv_summary$evaluation_role) |
+          cv_summary$evaluation_role == "primary_outer"), , drop = FALSE]
+    if (nrow(cv_plot_rows) == 0) {
+      cv_plot_rows <- cv_summary[!is.na(cv_summary$RMSE), , drop = FALSE]
+    }
     if (nrow(cv_plot_rows) > 0) {
-      plot_file <- out_path("06_report", "figures", paste0("cv_rmse_comparison_", TARGET_NAME, ".png"))
+      plot_file <- out_path(
+        "06_report", "figures", paste0("cv_rmse_comparison_", TARGET_NAME, ".png"))
       png(plot_file, width = 1400, height = 900)
       bar_cols <- ifelse(
         cv_plot_rows$model == "Regression Kriging", "#d62728",
         ifelse(cv_plot_rows$model == "Ordinary Kriging", "#1f77b4", "#2ca02c")
       )
       barplot(
-        height = cv_plot_rows$RMSE,
+        cv_plot_rows$RMSE,
         names.arg = paste(cv_plot_rows$cv_method, cv_plot_rows$model, sep = "\n"),
-        las = 2,
-        col = bar_cols,
-        ylab = "RMSE",
-        main = paste("Cross-validation RMSE comparison -", TARGET_FIELD)
+        las = 2, col = bar_cols, ylab = "RMSE on original units",
+        main = paste("Primary outer spatial CV RMSE -", TARGET_FIELD)
       )
       save_plot_done(plot_file)
       cv_rmse_plot_file <- plot_file
     }
-
-    log_msg("So sánh CV chỉ dùng để chẩn đoán; không dùng như tiêu chí đạt/không đạt cứng cho RK.")
-
     if (any(cv_summary$n_missing > 0, na.rm = TRUE)) {
-      add_science_warning("Một số dự báo kriging trong CV bị thiếu vì không tìm được điểm lân cận trong SEARCH_RADIUS.")
+      add_science_warning(
+        "Một số dự báo kriging trong CV bị thiếu vì không tìm được điểm lân cận trong SEARCH_RADIUS.")
     }
   } else {
     add_science_warning("Cross-validation không tạo được kết quả hợp lệ.")
   }
 }
 
-log_msg("\n[9] Kriging residual...")
+extrapolation_summary <- list(
+  available = FALSE, method = "CAST_AOA", outside_aoa_percent = NA_real_,
+  model_dependent = TRUE,
+  dependency_scope =
+    "predictor_set_preprocessing_model_development_points_and_cv_folds",
+  roi_membership_test = FALSE,
+  outside_roi_points_are_validation = FALSE,
+  message = "AOA diagnostics not run; AOA is not an ROI-membership test."
+)
+if (isTRUE(RUN_AOA_DIAGNOSTICS)) {
+  if (!requireNamespace("CAST", quietly = TRUE)) {
+    add_science_warning(
+      "Không có package CAST; Area of Applicability chưa được đánh giá.")
+  } else {
+    log_msg("\n[8b] Area of Applicability diagnostics...")
+    aoa_try <- try({
+      aoa_plan <- rk_make_cv_plan(
+        pts_model_sf, CV_OUTER_METHOD, CV_OUTER_FOLDS,
+        CV_RANDOM_SEED + 9001L, block_size = CV_OUTER_BLOCK_SIZE,
+        prediction_raster = template_raster
+      )
+      train_di <- CAST::trainDI(
+        train = model_df[, PREDICTORS, drop = FALSE],
+        variables = PREDICTORS, useWeight = FALSE, useCV = TRUE,
+        CVtest = lapply(aoa_plan$folds, function(z) z$test),
+        CVtrain = lapply(aoa_plan$folds, function(z) z$train),
+        verbose = FALSE
+      )
+      CAST::aoa(covs_utm, trainDI = train_di)
+    }, silent = TRUE)
+
+    if (inherits(aoa_try, "try-error")) {
+      add_science_warning(paste0(
+        "Không tính được Area of Applicability: ", as.character(aoa_try)))
+      extrapolation_summary$message <- as.character(aoa_try)
+    } else {
+      aoa_mask <- mask(aoa_try$AOA, complete_pc_mask)
+      aoa_di <- mask(aoa_try$DI, complete_pc_mask)
+      names(aoa_mask) <- paste0("AOA_", TARGET_NAME)
+      names(aoa_di) <- paste0("DI_", TARGET_NAME)
+      writeRaster(
+        aoa_mask,
+        out_path("05_final_rk",
+          paste0("area_of_applicability_", TARGET_NAME, "_utm.tif")),
+        overwrite = TRUE
+      )
+      writeRaster(
+        aoa_di,
+        out_path("05_final_rk",
+          paste0("dissimilarity_index_", TARGET_NAME, "_utm.tif")),
+        overwrite = TRUE
+      )
+      outside_aoa_percent <- tryCatch(
+        100 * as.numeric(global(aoa_mask == 0, "mean", na.rm = TRUE)[1, 1]),
+        error = function(e) NA_real_
+      )
+      extrapolation_summary <- list(
+        available = TRUE, method = "CAST_AOA",
+        threshold = aoa_try$parameters$threshold %||% NA_real_,
+        outside_aoa_percent = outside_aoa_percent,
+        weighted_predictors = FALSE,
+        cv_based_threshold = TRUE,
+        raster_aoa = paste0(
+          "05_final_rk/area_of_applicability_", TARGET_NAME, "_utm.tif"),
+        raster_dissimilarity = paste0(
+          "05_final_rk/dissimilarity_index_", TARGET_NAME, "_utm.tif"),
+        model_dependent = TRUE,
+        dependency_scope = paste0(
+          "predictors=", paste(PREDICTORS, collapse = "|"),
+          "; preprocessing=current_run; reference=all_model_development_points"
+        ),
+        roi_membership_test = FALSE,
+        outside_roi_points_are_validation = FALSE,
+        message = "AOA dựa trên covariate space và outer held-out folds nội bộ; không phải kiểm tra ROI hay field validation."
+      )
+      if (is.finite(outside_aoa_percent) &&
+          outside_aoa_percent > AOA_MAX_OUTSIDE_PERCENT_WARNING) {
+        add_science_warning(paste0(
+          round(outside_aoa_percent, 1),
+          "% vùng dự báo nằm ngoài Area of Applicability."))
+      }
+      if (is.finite(outside_aoa_percent) &&
+          outside_aoa_percent > AOA_MAX_OUTSIDE_PERCENT_HARD_FAIL) {
+        add_science_hard_failure(
+          "Diện tích ngoài AOA quá lớn; bản đồ không được auto-ACCEPT.")
+      }
+    }
+  }
+}
+
+log_msg("
+[9] Kriging residual...")
 
 template <- complete_pc_mask
+residual_spatial_structure_available <-
+  !isTRUE(fitted_vgm_pure_nugget) &&
+  is.finite(nugget_sill_ratio) &&
+  nugget_sill_ratio < PURE_NUGGET_RATIO_THRESHOLD &&
+  is.finite(fitted_vgm_params$psill) &&
+  fitted_vgm_params$psill > 0
+final_prediction_method <- "regression_kriging"
 
-grid_df <- as.data.frame(
-  template,
-  xy = TRUE,
-  cells = TRUE,
-  na.rm = TRUE
-)
-
-grid_cells <- grid_df$cell
-grid_df <- grid_df[, c("cell", "x", "y")]
-
-coordinates(grid_df) <- ~x + y
-proj4string(grid_df) <- CRS(SRS_string = terra::crs(template))
-
-res_krig <- krige(
-  formula = residual ~ 1,
-  locations = pts_sp,
-  newdata = grid_df,
-  model = fitted_vgm,
-  nmax = NMAX_NEIGHBORS,
-  maxdist = SEARCH_RADIUS
-)
-
-residual_raster <- template
-residual_var_raster <- template
-
-values(residual_raster) <- NA_real_
-values(residual_var_raster) <- NA_real_
-
-residual_raster[grid_cells] <- res_krig$var1.pred
-residual_var_raster[grid_cells] <- res_krig$var1.var
-
-residual_raster <- mask(residual_raster, complete_pc_mask)
-residual_var_raster <- mask(residual_var_raster, complete_pc_mask)
-
+if (!residual_spatial_structure_available &&
+    identical(PURE_NUGGET_POLICY, "regression_only")) {
+  add_science_message(
+    "Final map đã chuyển sang regression-only vì residual variogram là pure nugget.")
+  final_prediction_method <- "regression_only_pure_nugget_fallback"
+  residual_raster <- ifel(!is.na(template), 0, NA)
+  residual_var_raster <- template * NA_real_
+} else {
+  grid_df <- as.data.frame(
+    template, xy = TRUE, cells = TRUE, na.rm = TRUE)
+  grid_cells <- grid_df$cell
+  grid_df <- grid_df[, c("cell", "x", "y")]
+  coordinates(grid_df) <- ~x + y
+  proj4string(grid_df) <- CRS(SRS_string = terra::crs(template))
+  res_krig <- krige(
+    formula = residual ~ 1, locations = pts_sp, newdata = grid_df,
+    model = fitted_vgm, nmax = NMAX_NEIGHBORS,
+    maxdist = SEARCH_RADIUS, debug.level = 0
+  )
+  residual_raster <- template
+  residual_var_raster <- template
+  values(residual_raster) <- NA_real_
+  values(residual_var_raster) <- NA_real_
+  residual_raster[grid_cells] <- res_krig$var1.pred
+  residual_var_raster[grid_cells] <- res_krig$var1.var
+  residual_raster <- mask(residual_raster, complete_pc_mask)
+  residual_var_raster <- mask(residual_var_raster, complete_pc_mask)
+}
+LOG_BACKTRANSFORM_BIAS_CORRECTION_APPLIED <-
+  isTRUE(LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE) &&
+  isTRUE(residual_spatial_structure_available)
+if (isTRUE(LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE) &&
+    !isTRUE(LOG_BACKTRANSFORM_BIAS_CORRECTION_APPLIED)) {
+  add_science_message(paste0(
+    "Đã tắt bias correction cho output production vì residual variogram ",
+    "là pure nugget và không có residual kriging variance hợp lệ."
+  ))
+}
 names(residual_raster) <- "kriged_residual"
 names(residual_var_raster) <- "residual_kriging_variance"
-
 writeRaster(
   residual_raster,
-  out_path("04_kriging_residual", paste0("residual_kriging_", TARGET_NAME, "_utm.tif")),
+  out_path("04_kriging_residual",
+    paste0("residual_kriging_", TARGET_NAME, "_utm.tif")),
   overwrite = TRUE
 )
-
 writeRaster(
   residual_var_raster,
-  out_path("04_kriging_residual", paste0("residual_variance_", TARGET_NAME, "_utm.tif")),
+  out_path("04_kriging_residual",
+    paste0("residual_variance_", TARGET_NAME, "_utm.tif")),
   overwrite = TRUE
 )
 
@@ -1825,42 +2769,78 @@ residual_var_raster <- clamp(
   lower = 0,
   values = TRUE
 )
-rk_final <- rk_back_transform_raster(
-  rk_final_model,
-  TARGET_TRANSFORM_ACTIVE,
+rk_final_unclamped <- rk_back_transform_raster(
+  rk_final_model, TARGET_TRANSFORM_ACTIVE,
   variance_raster = residual_var_raster,
-  bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE
+  bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_APPLIED
 )
-rk_final <- mask(rk_final, complete_pc_mask)
+rk_final_unclamped <- mask(rk_final_unclamped, complete_pc_mask)
+names(rk_final_unclamped) <- paste0("RK_unclamped_", TARGET_NAME)
 
-names(rk_final) <- paste0("RK_", TARGET_NAME)
-
-if (CLAMP_TO_SAMPLE_RANGE) {
-  rk_final <- clamp(
-    rk_final,
-    lower = sample_min,
-    upper = sample_max,
-    values = TRUE
-  )
-
-  rk_final <- mask(rk_final, complete_pc_mask)
-
-  log_msg("Clamped final raster to sample min/max.")
+rk_clipping_mask <- ifel(
+  rk_final_unclamped < sample_min, -1,
+  ifel(rk_final_unclamped > sample_max, 1, 0)
+)
+rk_clipping_mask <- mask(rk_clipping_mask, complete_pc_mask)
+names(rk_clipping_mask) <- paste0("RK_clipping_mask_", TARGET_NAME)
+clipped_low_percent <- tryCatch(
+  100 * as.numeric(global(rk_clipping_mask == -1, "mean", na.rm = TRUE)[1, 1]),
+  error = function(e) NA_real_
+)
+clipped_high_percent <- tryCatch(
+  100 * as.numeric(global(rk_clipping_mask == 1, "mean", na.rm = TRUE)[1, 1]),
+  error = function(e) NA_real_
+)
+total_clipped_percent <- clipped_low_percent + clipped_high_percent
+if (is.finite(total_clipped_percent) &&
+    total_clipped_percent > MAX_CLIPPED_AREA_PERCENT_WARNING) {
+  add_science_warning(paste0(
+    round(total_clipped_percent, 2),
+    "% cell nằm ngoài min-max mẫu trước clamp; cần xem extrapolation/clipping mask."
+  ))
+}
+if (is.finite(total_clipped_percent) &&
+    total_clipped_percent > MAX_CLIPPED_AREA_PERCENT_HARD_FAIL) {
+  add_science_hard_failure(
+    "Tỷ lệ clipping quá lớn; bản đồ không được auto-ACCEPT.")
 }
 
-rk_variance_original <- rk_back_transform_variance_raster(
-  residual_var_raster,
-  rk_final_model,
-  TARGET_TRANSFORM_ACTIVE,
-  bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE
-)
-rk_variance_original <- clamp(rk_variance_original, lower = 0, values = TRUE)
-rk_std <- sqrt(rk_variance_original)
-rk_std <- mask(rk_std, complete_pc_mask)
+rk_final <- if (isTRUE(CLAMP_TO_SAMPLE_RANGE)) {
+  clamp(rk_final_unclamped, lower = sample_min, upper = sample_max, values = TRUE)
+} else {
+  rk_final_unclamped
+}
+rk_final <- mask(rk_final, complete_pc_mask)
+names(rk_final) <- paste0("RK_", TARGET_NAME)
+if (isTRUE(CLAMP_TO_SAMPLE_RANGE)) {
+  log_msg("Clamped final raster to sample min/max; audit rasters retain unclamped values.")
+}
 
-names(rk_std) <- paste0("RK_STD_", TARGET_NAME)
-
-add_science_warning("RK uncertainty STD hiện chỉ là độ lệch chuẩn kriging phần dư; chưa bao gồm bất định từ mô hình hồi quy hoặc biến phụ trợ.")
+uncertainty_available <- isTRUE(residual_spatial_structure_available)
+if (uncertainty_available) {
+  rk_variance_original <- rk_back_transform_variance_raster(
+    residual_var_raster,
+    rk_final_model,
+    TARGET_TRANSFORM_ACTIVE,
+    bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_APPLIED
+  )
+  rk_variance_original <- clamp(
+    rk_variance_original, lower = 0, values = TRUE)
+  rk_std <- sqrt(rk_variance_original)
+  rk_std <- mask(rk_std, complete_pc_mask)
+  add_science_message(paste0(
+    "Residual kriging SD (file tương thích RK_uncertainty_STD) chỉ mô tả phần dư; ",
+    "không phải total predictive uncertainty hay prediction interval."
+  ))
+} else {
+  rk_variance_original <- template * NA_real_
+  rk_std <- template * NA_real_
+  add_science_message(paste0(
+    "Không xuất residual kriging STD vì variogram phần dư là pure nugget; ",
+    "không có uncertainty raster RK hợp lệ."
+  ))
+}
+names(rk_std) <- paste0("residual_kriging_SD_", TARGET_NAME)
 
 writeRaster(
   rk_final,
@@ -1869,19 +2849,30 @@ writeRaster(
 )
 
 writeRaster(
-  rk_std,
-  out_path("05_final_rk", paste0("RK_uncertainty_STD_", TARGET_NAME, "_utm.tif")),
+  rk_final_unclamped,
+  out_path("05_final_rk", paste0("RK_final_unclamped_", TARGET_NAME, "_utm.tif")),
+  overwrite = TRUE
+)
+writeRaster(
+  rk_clipping_mask,
+  out_path("05_final_rk", paste0("RK_clipping_mask_", TARGET_NAME, "_utm.tif")),
   overwrite = TRUE
 )
 
+uncertainty_utm_file <- out_path(
+  "05_final_rk", paste0("RK_uncertainty_STD_", TARGET_NAME, "_utm.tif"))
+if (uncertainty_available) {
+  writeRaster(rk_std, uncertainty_utm_file, overwrite = TRUE)
+}
+
 if (!is.na(EXPORT_EPSG)) {
   export_crs <- paste0("EPSG:", EXPORT_EPSG)
-  safe_project_write <- function(r, file, label) {
+  safe_project_write <- function(r, file, label, method = "bilinear") {
     ok <- tryCatch({
       terra::project(
         r,
         export_crs,
-        method = "bilinear",
+        method = method,
         filename = file,
         overwrite = TRUE
       )
@@ -1904,10 +2895,27 @@ if (!is.na(EXPORT_EPSG)) {
     "RK final raster"
   )
 
+  if (uncertainty_available) {
+    safe_project_write(
+      rk_std,
+      out_path("05_final_rk", paste0(
+        "RK_uncertainty_STD_", TARGET_NAME,
+        "_epsg", EXPORT_EPSG, ".tif"
+      )),
+      "Residual kriging SD raster (legacy-compatible filename)"
+    )
+  }
   safe_project_write(
-    rk_std,
-    out_path("05_final_rk", paste0("RK_uncertainty_STD_", TARGET_NAME, "_epsg", EXPORT_EPSG, ".tif")),
-    "RK uncertainty STD raster"
+    rk_final_unclamped,
+    out_path("05_final_rk", paste0(
+      "RK_final_unclamped_", TARGET_NAME, "_epsg", EXPORT_EPSG, ".tif")),
+    "RK unclamped raster"
+  )
+  safe_project_write(
+    rk_clipping_mask,
+    out_path("05_final_rk", paste0(
+      "RK_clipping_mask_", TARGET_NAME, "_epsg", EXPORT_EPSG, ".tif")),
+    "RK clipping mask", method = "near"
   )
 }
 
@@ -1915,36 +2923,147 @@ rk_min <- global(rk_final, "min", na.rm = TRUE)[1, 1]
 rk_max <- global(rk_final, "max", na.rm = TRUE)[1, 1]
 rk_mean <- global(rk_final, "mean", na.rm = TRUE)[1, 1]
 
-std_min <- global(rk_std, "min", na.rm = TRUE)[1, 1]
-std_max <- global(rk_std, "max", na.rm = TRUE)[1, 1]
-std_mean <- global(rk_std, "mean", na.rm = TRUE)[1, 1]
-std_q80 <- tryCatch(
-  as.numeric(global(rk_std, function(x, ...) stats::quantile(x, 0.80, na.rm = TRUE), na.rm = TRUE)[1, 1]),
-  error = function(e) NA_real_
-)
+std_min <- std_max <- std_mean <- std_q80_display <- NA_real_
+if (uncertainty_available) {
+  std_min <- global(rk_std, "min", na.rm = TRUE)[1, 1]
+  std_max <- global(rk_std, "max", na.rm = TRUE)[1, 1]
+  std_mean <- global(rk_std, "mean", na.rm = TRUE)[1, 1]
+  std_q80_display <- tryCatch(
+    as.numeric(global(
+      rk_std,
+      function(x, ...) stats::quantile(x, 0.80, na.rm = TRUE),
+      na.rm = TRUE
+    )[1, 1]),
+    error = function(e) NA_real_
+  )
+}
+primary_rk_row <- data.frame()
+if (exists("cv_summary") && nrow(cv_summary) > 0) {
+  primary_rk_row <- cv_summary[
+    cv_summary$model == "Regression Kriging" &
+      cv_summary$cv_method == "nested_spatial_block", , drop = FALSE]
+  if (nrow(primary_rk_row) == 0) {
+    primary_rk_row <- cv_summary[
+      cv_summary$model == "Regression Kriging", , drop = FALSE]
+  }
+}
+outer_cv_rmse <- if (nrow(primary_rk_row) > 0)
+  suppressWarnings(as.numeric(primary_rk_row$RMSE[1])) else NA_real_
+profiles_for_uncertainty <- load_evaluation_profiles(EVALUATION_PROFILE_FILE)
+profile_for_uncertainty <- match_indicator_profile(
+  TARGET_FIELD, profiles_for_uncertainty)
+profile_sd_threshold <- suppressWarnings(as.numeric(
+  profile_for_uncertainty$uncertainty_sd_threshold %||% NA_real_))
+uncertainty_threshold <- if (!uncertainty_available) {
+  NA_real_
+} else if (is.finite(profile_sd_threshold)) {
+  profile_sd_threshold
+} else {
+  outer_cv_rmse
+}
+uncertainty_threshold_source <- if (!uncertainty_available) {
+  "unavailable_pure_nugget"
+} else if (is.finite(profile_sd_threshold)) {
+  "profile_absolute_residual_sd_display_reference"
+} else if (is.finite(outer_cv_rmse)) {
+  "outer_heldout_rmse_display_reference"
+} else {
+  "not_defined"
+}
 std_high_pct <- tryCatch(
-  if (is.finite(std_q80)) as.numeric(global(rk_std >= std_q80, "mean", na.rm = TRUE)[1, 1]) * 100 else NA_real_,
+  if (is.finite(uncertainty_threshold)) {
+    100 * as.numeric(global(
+      rk_std >= uncertainty_threshold, "mean", na.rm = TRUE)[1, 1])
+  } else NA_real_,
   error = function(e) NA_real_
 )
-var_min <- global(rk_variance_original, "min", na.rm = TRUE)[1, 1]
-var_max <- global(rk_variance_original, "max", na.rm = TRUE)[1, 1]
-var_mean <- global(rk_variance_original, "mean", na.rm = TRUE)[1, 1]
+observed_iqr <- stats::IQR(model_df[[TARGET_FIELD]], na.rm = TRUE)
+normalized_mean_sd_iqr <- if (is.finite(observed_iqr) && observed_iqr > 0)
+  std_mean / observed_iqr else NA_real_
+var_min <- var_max <- var_mean <- NA_real_
+if (uncertainty_available) {
+  var_min <- global(rk_variance_original, "min", na.rm = TRUE)[1, 1]
+  var_max <- global(rk_variance_original, "max", na.rm = TRUE)[1, 1]
+  var_mean <- global(rk_variance_original, "mean", na.rm = TRUE)[1, 1]
+}
 uncertainty_summary <- list(
-  available = TRUE,
-  min_sd = std_min,
-  mean_sd = std_mean,
-  max_sd = std_max,
-  min_variance = var_min,
-  mean_variance = var_mean,
-  max_variance = var_max,
-  high_uncertainty_threshold = std_q80,
+  available = uncertainty_available,
+  uncertainty_type = if (uncertainty_available) {
+    "residual_kriging_standard_deviation"
+  } else {
+    "not_available_pure_nugget"
+  },
+  product_semantics =
+    "partial_residual_kriging_sd_not_total_predictive_uncertainty",
+  legacy_filename_compatibility = "RK_uncertainty_STD_*.tif",
+  total_predictive_uncertainty_available = FALSE,
+  prediction_interval_claim_allowed = FALSE,
+  prediction_interval_type = "not_available_from_residual_kriging_sd",
+  coverage_95_semantics =
+    "residual_variance_diagnostic_only_not_prediction_interval_validation",
+  calibration_approved = FALSE,
+  calibration_basis = if (uncertainty_available) {
+    "residual_kriging_only"
+  } else {
+    "not_available"
+  },
+  calibrated = FALSE,
+  used_in_grade = FALSE,
+  min_sd = std_min, mean_sd = std_mean, max_sd = std_max,
+  min_variance = var_min, mean_variance = var_mean, max_variance = var_max,
+  display_q80 = std_q80_display,
+  high_uncertainty_threshold = uncertainty_threshold,
+  threshold_source = uncertainty_threshold_source,
   high_uncertainty_area_percent = std_high_pct,
+  normalized_mean_sd_by_observed_iqr = normalized_mean_sd_iqr,
+  n_interval = if (nrow(primary_rk_row) > 0 &&
+      "n_interval" %in% names(primary_rk_row)) {
+    primary_rk_row$n_interval[1]
+  } else {
+    NA_integer_
+  },
+  interval_fraction = if (nrow(primary_rk_row) > 0 &&
+      "interval_fraction" %in% names(primary_rk_row)) {
+    primary_rk_row$interval_fraction[1]
+  } else {
+    NA_real_
+  },
+  coverage_95 = if (nrow(primary_rk_row) > 0)
+    primary_rk_row$coverage_95[1] else NA_real_,
+  mean_standardized_error = if (nrow(primary_rk_row) > 0)
+    primary_rk_row$mean_standardized_error[1] else NA_real_,
+  variance_standardized_RMSE = if (nrow(primary_rk_row) > 0 &&
+      "variance_standardized_RMSE" %in% names(primary_rk_row))
+    primary_rk_row$variance_standardized_RMSE[1] else NA_real_,
+  interval_score_95 = if (nrow(primary_rk_row) > 0 &&
+      "interval_score_95" %in% names(primary_rk_row))
+    primary_rk_row$interval_score_95[1] else NA_real_,
+  messages = if (uncertainty_available) {
+    "Residual kriging SD only; interval diagnostics are not calibrated total predictive intervals and are not scored."
+  } else {
+    "Residual uncertainty raster is unavailable because the final residual variogram is pure nugget."
+  },
   warnings = character(0)
 )
 
-best_variogram_sse <- NA
+best_variogram_sse <- NA_real_
 if (exists("candidate_table") && nrow(candidate_table) > 0) {
-  best_variogram_sse <- min(candidate_table$sse, na.rm = TRUE)
+  selected_candidate <- if (fitted_vgm_pure_nugget) {
+    candidate_table[
+      candidate_table$status == "pure_nugget_fallback", , drop = FALSE]
+  } else {
+    candidate_table[
+      candidate_table$accepted %in% TRUE, , drop = FALSE]
+  }
+  if (nrow(selected_candidate) > 0) {
+    selected_candidate <- selected_candidate[
+      order(selected_candidate$candidate_score,
+        selected_candidate$sse_per_pair),
+      , drop = FALSE
+    ]
+    best_variogram_sse <- suppressWarnings(
+      as.numeric(selected_candidate$sse[1]))
+  }
 }
 
 vgm_params <- get_vgm_params(fitted_vgm)
@@ -1960,45 +3079,75 @@ lookup_cv <- function(method, model, field) {
   return(row[[field]][1])
 }
 
-if (length(scientific_warnings) == 0) {
-  scientific_warnings <- "Không có cảnh báo khoa học nào theo các ngưỡng hiện tại."
+issue_table <- function(values, column) {
+  out <- data.frame(id = seq_along(values), stringsAsFactors = FALSE)
+  out[[column]] <- values
+  out
 }
-
-warning_table <- data.frame(
-  id = seq_along(scientific_warnings),
-  warning = scientific_warnings,
-  stringsAsFactors = FALSE
-)
-
 write.csv(
-  warning_table,
-  out_path("06_report", "tables", paste0("scientific_warnings_", TARGET_NAME, ".csv")),
-  row.names = FALSE
+  issue_table(scientific_messages, "message"),
+  out_path("06_report", "tables",
+    paste0("scientific_messages_", TARGET_NAME, ".csv")),
+  row.names = FALSE, fileEncoding = "UTF-8"
 )
-
+write.csv(
+  issue_table(scientific_warnings, "warning"),
+  out_path("06_report", "tables",
+    paste0("scientific_warnings_", TARGET_NAME, ".csv")),
+  row.names = FALSE, fileEncoding = "UTF-8"
+)
+write.csv(
+  issue_table(scientific_hard_failures, "hard_failure"),
+  out_path("06_report", "tables",
+    paste0("scientific_hard_failures_", TARGET_NAME, ".csv")),
+  row.names = FALSE, fileEncoding = "UTF-8"
+)
 writeLines(
   c(
-    "Cảnh báo khoa học và ghi chú diễn giải",
-    paste0("Target: ", TARGET_FIELD),
+    "Thông báo, cảnh báo và điều kiện chặn ACCEPT",
+    paste0("Target: ", TARGET_FIELD), "",
+    "THÔNG BÁO:",
+    if (length(scientific_messages)) scientific_messages else "(trống)",
+    "", "CẢNH BÁO:",
+    if (length(scientific_warnings)) scientific_warnings else "(trống)",
+    "", "HARD FAILURES:",
+    if (length(scientific_hard_failures)) scientific_hard_failures else "(trống)",
     "",
-    paste0(seq_along(scientific_warnings), ". ", scientific_warnings),
-    "",
-    "Quan trọng: RK_uncertainty_STD là độ lệch chuẩn kriging phần dư, chưa phải toàn bộ bất định dự báo."
+    "RK_uncertainty_STD là residual kriging SD; không phải total predictive uncertainty hoặc prediction interval."
   ),
-  out_path("06_report", paste0("warnings_", TARGET_NAME, ".txt"))
+  out_path("06_report", paste0("warnings_", TARGET_NAME, ".txt")),
+  useBytes = TRUE
 )
 
 report <- data.frame(
   run_name = RUN_NAME,
   output_folder = OUT_DIR,
-  roi_handling = "not_used_pc_rasters_pre_masked_buffered",
+  roi_handling =
+    "model support uses complete covariates; final project deliverables mask to ROI",
   target = TARGET_FIELD,
+  target_metadata_confirmed = isTRUE(target_metadata_active$confirmed),
+  product_status_pre_evaluation = if (!isTRUE(target_metadata_active$confirmed)) {
+    "DRAFT_UNCONFIRMED_METADATA"
+  } else if (!outside_review_gate_passed) {
+    "DRAFT_PENDING_OUTSIDE_REVIEW"
+  } else "SCIENTIFIC_QA",
+  final_prediction_method = final_prediction_method,
   target_transform_requested = target_transform_info$requested,
   target_transform_used = TARGET_TRANSFORM_ACTIVE,
-  log_backtransform_bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE,
+  log_backtransform_bias_correction_requested =
+    LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE,
+  log_backtransform_bias_correction =
+    LOG_BACKTRANSFORM_BIAS_CORRECTION_APPLIED,
   predictors = paste(PREDICTORS, collapse = ", "),
   n_predictors = length(PREDICTORS),
   n_points_raw_valid = nrow(pts_raw),
+  n_points_inside_roi_model = n_inside_roi_model,
+  n_points_outside_roi_model = n_outside_roi_model,
+  n_outside_pending_review = length(outside_pending_idx),
+  n_outside_include_false_in_primary = length(outside_include_false_idx),
+  outside_roi_points_are_validation = FALSE,
+  primary_product_eligible = outside_review_gate_passed,
+  sensitivity_analysis_eligible = TRUE,
   n_points_used_model = nrow(model_df),
   sample_min = sample_min,
   sample_max = sample_max,
@@ -2013,6 +3162,14 @@ report <- data.frame(
   spatial_cv_ok_rmse = lookup_cv("spatial_kmeans", "Ordinary Kriging", "RMSE"),
   spatial_cv_rk_rmse = lookup_cv("spatial_kmeans", "Regression Kriging", "RMSE"),
   spatial_cv_rk_n_predicted = lookup_cv("spatial_kmeans", "Regression Kriging", "n_predicted"),
+  nested_outer_rk_rmse = lookup_cv("nested_spatial_block", "Regression Kriging", "RMSE"),
+  nested_outer_rk_r2 = lookup_cv("nested_spatial_block", "Regression Kriging", "R2"),
+  nested_outer_repeats = cv_validation_metadata$outer_repeats %||% 0L,
+  validation_design = cv_validation_metadata$validation_design,
+  validation_task = cv_validation_metadata$validation_task,
+  independent_field_validation = FALSE,
+  cv_sample_role = "model_development",
+  strict_outer_cv = isTRUE(cv_validation_metadata$strict_outer_cv),
   variogram_mode = VARIOGRAM_MODE,
   final_variogram_model = vgm_params$model,
   final_variogram_nugget = vgm_params$nugget,
@@ -2020,6 +3177,8 @@ report <- data.frame(
   final_variogram_range = vgm_params$range,
   final_variogram_practical_range = fitted_practical_range,
   final_nugget_sill_ratio = nugget_sill_ratio,
+  final_variogram_singular = fitted_vgm_singular,
+  anisotropy_ratio = anisotropy_ratio,
   best_variogram_sse = best_variogram_sse,
   variogram_cutoff = VARIOGRAM_CUTOFF,
   variogram_width = VARIOGRAM_WIDTH,
@@ -2034,13 +3193,21 @@ report <- data.frame(
   valid_pc_cells = valid_pc_cells,
   median_sample_spacing_m = nn_table$median_m[1],
   max_sample_spacing_m = nn_table$max_m[1],
+  n_scientific_messages = length(scientific_messages),
   n_scientific_warnings = length(scientific_warnings),
+  n_scientific_hard_failures = length(scientific_hard_failures),
+  clipped_area_percent = total_clipped_percent,
+  outside_aoa_percent = extrapolation_summary$outside_aoa_percent %||% NA_real_,
   rk_min = rk_min,
   rk_max = rk_max,
   rk_mean = rk_mean,
   std_min = std_min,
   std_max = std_max,
-  std_mean = std_mean
+  std_mean = std_mean,
+  uncertainty_product_type = "residual_kriging_standard_deviation",
+  total_predictive_uncertainty_available = FALSE,
+  prediction_interval_claim_allowed = FALSE,
+  uncertainty_legacy_filename = "RK_uncertainty_STD_*.tif"
 )
 
 write.csv(
@@ -2052,9 +3219,17 @@ write.csv(
 log_msg("\n[12] Export RK quality evaluation report...")
 
 quality_cv <- data.frame()
+preferred_method <- NA_character_
 if (exists("cv_predictions") && nrow(cv_predictions) > 0) {
-  preferred_method <- if ("spatial_kmeans" %in% cv_predictions$cv_method) "spatial_kmeans" else cv_predictions$cv_method[1]
-  quality_cv <- cv_predictions[cv_predictions$cv_method == preferred_method, , drop = FALSE]
+  preference <- c(
+    "nested_spatial_block", "spatial_block", "buffer", "nndm",
+    "spatial_kmeans", "random"
+  )
+  available_methods <- unique(as.character(cv_predictions$cv_method))
+  preferred_method <- preference[preference %in% available_methods][1]
+  if (is.na(preferred_method)) preferred_method <- available_methods[1]
+  quality_cv <- cv_predictions[
+    cv_predictions$cv_method == preferred_method, , drop = FALSE]
   log_msg("Evaluation CV method: ", preferred_method)
 }
 
@@ -2081,12 +3256,36 @@ if (nrow(quality_cv) == 0) {
 
 quality_context <- list(
   target_field = TARGET_FIELD,
+  prediction_method = final_prediction_method,
   target_name = TARGET_NAME,
   output_dir = out_path("06_report"),
   config_path = EVALUATION_PROFILE_FILE,
+  target_metadata = target_metadata_active,
   observed = model_df[[TARGET_FIELD]],
   regression_predicted = model_df$reg_pred,
-  target_transform = list(requested = target_transform_info$requested, used = TARGET_TRANSFORM_ACTIVE, profile = target_transform_info$profile_name, reason = target_transform_info$recommendation$reason %||% "", requires_nonnegative = target_transform_info$requires_nonnegative, log_backtransform_bias_correction = LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE, metric_scale = "original units", ok_baseline_scale = ifelse(identical(TARGET_TRANSFORM_ACTIVE, "log1p"), "log1p(target), back-transformed before metrics", "original units")),
+  target_transform = list(
+    requested = target_transform_info$requested,
+    used = TARGET_TRANSFORM_ACTIVE,
+    profile = target_transform_info$profile_name,
+    reason = target_transform_info$recommendation$reason %||% "",
+    requires_nonnegative = target_transform_info$requires_nonnegative,
+    log_backtransform_bias_correction_requested =
+      LOG_BACKTRANSFORM_BIAS_CORRECTION_ACTIVE,
+    log_backtransform_bias_correction =
+      LOG_BACKTRANSFORM_BIAS_CORRECTION_APPLIED,
+    bias_correction_basis = if (
+      LOG_BACKTRANSFORM_BIAS_CORRECTION_APPLIED) {
+      "partial_residual_kriging_variance_only"
+    } else {
+      "not_applied"
+    },
+    metric_scale = "original units",
+    ok_baseline_scale = ifelse(
+      identical(TARGET_TRANSFORM_ACTIVE, "log1p"),
+      "log1p(target), direct inverse before CV metrics",
+      "original units"
+    )
+  ),
   residuals = model_df$residual,
   coordinates = as.data.frame(st_coordinates(pts_model_sf)),
   variogram_params = list(
@@ -2096,28 +3295,70 @@ quality_context <- list(
     range = vgm_params$range,
     practical_range = fitted_practical_range,
     lag_width = VARIOGRAM_WIDTH,
-    fit_sse = best_variogram_sse
+    fit_sse = best_variogram_sse,
+    fit_method = if (fitted_vgm_pure_nugget) NA_integer_ else 7L,
+    singular = fitted_vgm_singular,
+    anisotropy_ratio = anisotropy_ratio,
+    anisotropy_major_direction = anisotropy_major_direction,
+    robust_relative_difference = robust_relative_difference
   ),
   experimental_variogram = experimental_vgm,
   range_max = VARIOGRAM_RANGE_MAX,
   cv_summary = cv_summary,
   cv_predictions = quality_cv,
   cv_method = if ("cv_method" %in% names(quality_cv) && nrow(quality_cv) > 0) quality_cv$cv_method[1] else NA_character_,
-  cv_folds = CV_K_FOLDS,
-  cv_refit_variogram = CV_REFIT_VARIOGRAM,
+  cv_folds = cv_validation_metadata$outer_folds %||% CV_K_FOLDS,
+  cv_refit_variogram = TRUE,
+  cv_metadata = cv_validation_metadata,
+  cv_stability = if (!is.null(nested_cv_result))
+    nested_cv_result$stability else list(),
   cv_observed = quality_cv$observed,
   cv_regression_predicted = quality_cv$regression_only,
   cv_ok_predicted = quality_cv$ordinary_kriging,
   cv_rk_predicted = quality_cv$regression_kriging,
   prediction_sd_values = NULL,
   prediction_sd_summary = uncertainty_summary,
+  point_support = point_support_summary,
+  extrapolation = extrapolation_summary,
+  clipping = list(
+    model_dependent = TRUE,
+    dependency_scope =
+      "observed_target_range_of_current_model_development_points",
+    outside_roi_points_are_validation = FALSE,
+    interpretation = "audit_only_not_validation_and_not_uncertainty",
+    clamp_enabled = isTRUE(CLAMP_TO_SAMPLE_RANGE),
+    clamp_lower = sample_min,
+    clamp_upper = sample_max,
+    clipped_low_percent = clipped_low_percent,
+    clipped_high_percent = clipped_high_percent,
+    total_clipped_percent = total_clipped_percent,
+    unclamped_raster = paste0("../05_final_rk/RK_final_unclamped_",
+      TARGET_NAME, "_utm.tif"),
+    clipping_mask = paste0("../05_final_rk/RK_clipping_mask_",
+      TARGET_NAME, "_utm.tif")
+  ),
+  messages = scientific_messages,
   warnings = scientific_warnings,
+  hard_failures = scientific_hard_failures,
   report_links = list(
     "Interactive variogram" = paste0("interactive/", basename(report_interactive_variogram_file)),
     "Variogram PNG" = paste0("figures/", basename(report_variogram_plot_file)),
     "CV RMSE chart" = ifelse(is.na(cv_rmse_plot_file), "", paste0("figures/", basename(cv_rmse_plot_file))),
     "Detailed tables folder" = "tables/",
-    "JSON diagnostics folder" = "json/"
+    "JSON diagnostics folder" = "json/",
+    "RK unclamped raster" = paste0("../05_final_rk/RK_final_unclamped_",
+      TARGET_NAME, "_utm.tif"),
+    "RK clipping mask" = paste0("../05_final_rk/RK_clipping_mask_",
+      TARGET_NAME, "_utm.tif"),
+    "Residual kriging SD (legacy RK_uncertainty_STD filename)" = if (uncertainty_available) {
+      paste0("../05_final_rk/RK_uncertainty_STD_",
+        TARGET_NAME, "_utm.tif")
+    } else {
+      ""
+    },
+    "Area of Applicability" = if (isTRUE(extrapolation_summary$available))
+      paste0("../05_final_rk/area_of_applicability_", TARGET_NAME,
+        "_utm.tif") else ""
   )
 )
 

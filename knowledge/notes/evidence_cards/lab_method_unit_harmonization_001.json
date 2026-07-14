@@ -1,0 +1,21 @@
+{
+  "claim_id": "lab_method_unit_harmonization_001",
+  "claim": "Soil analytical values are comparable only when property definition, sample support, preparation, extraction or digestion method, soil-to-solution ratio, reporting basis and unit are compatible or explicitly harmonized.",
+  "applies_to": [
+    "laboratory_analysis",
+    "laboratory_methods",
+    "units",
+    "extractant",
+    "lab_qa_qc"
+  ],
+  "evidence_sources": [
+    "fao_glosolan_sops",
+    "batjes_2025_wosis_methods",
+    "usda_2022_kssl_methods"
+  ],
+  "strength": "strong",
+  "conditions": "Especially important for pH in water versus KCl, available phosphorus by Olsen/Bray/Mehlich, potassium in mg/kg versus cmolc/kg, EC extract ratios, and SOC versus OM methods.",
+  "limitations": "Conversions may be soil- and method-specific; a generic conversion can add bias.",
+  "recommended_action": "Keep sample_actual simple, but maintain an indicator dictionary with canonical name, unit, method, extractant, ratio, detection limit, valid range and laboratory batch; split incompatible methods into separate targets.",
+  "not_allowed_action": "Do not merge results from different methods into one target column merely because the element name is the same."
+}

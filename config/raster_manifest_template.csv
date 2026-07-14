@@ -1,0 +1,3 @@
+layer,file,type,resampling,provenance
+PC1,PC1.tif,continuous,bilinear,PCA score from documented preprocessing
+soil_type,soil_type.tif,categorical,near,Class codes with separate legend

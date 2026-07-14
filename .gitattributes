@@ -1,0 +1,19 @@
+# Stable text encoding/line endings across Windows and CI.
+*.R text eol=lf
+.Rprofile text eol=lf
+DESCRIPTION text eol=lf
+.gitattributes text eol=lf
+*.Rmd text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.csv text eol=lf
+*.txt text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.xlsx binary
+*.tif binary
+*.tiff binary
+*.png binary

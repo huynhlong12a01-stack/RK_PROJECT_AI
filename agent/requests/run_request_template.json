@@ -1,6 +1,6 @@
 {
-  "run_id": "pH_iter_001",
-  "target_field": "pH",
+  "run_id": "pH_H2O_iter_001",
+  "target_field": "pH_H2O",
   "run_mode": "rk_evaluation",
   "base_config": "scripts/00_config.R",
   "output_root": "output/agent_runs",

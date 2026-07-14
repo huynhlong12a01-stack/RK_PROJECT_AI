@@ -11,14 +11,19 @@ Không được chọn mô hình chỉ vì RMSE thấp nhất.
 
 Cần cân bằng:
 
-- R²_pred, RMSE, MAE, ME trên đơn vị gốc.
+- Outer spatial CV R²_pred, RMSE, MAE, ME trên đơn vị gốc và phân phối qua repeats.
 - Regression-only / Ordinary Kriging / Regression Kriging baseline.
 - Transform đã dùng, bias correction nếu có.
 - Nugget/Sill, range, range_hit_max, practical range/cutoff.
 - Class accuracy và severe misclassification nếu chỉ tiêu có phân cấp.
-- Uncertainty/residual kriging STD nếu có.
+- AOA, clipping; uncertainty chỉ được đánh giá nếu calibrated total predictive intervals. Residual STD chỉ là thông tin.
 - Cảnh báo dữ liệu, outlier, sampling, CRS/raster/covariate.
 - Evidence cards/RAG context nội bộ nếu được cung cấp.
+- hard_failures, strict_outer_cv và leakage_guard.
+- variogram singular, directional anisotropy, range_hit_max và pure nugget.
+- prediction_method; nếu là regression_only_pure_nugget_fallback thì không được diễn giải output như RK có cải thiện không gian.
+- Tên/profile chỉ tiêu có mơ hồ về phương pháp hoặc đơn vị hay không.
+
 
 Nếu transform = log1p, hãy nhớ: Regression-only, OK và RK đều phải được so sánh bằng metric trên đơn vị gốc sau back-transform. OK baseline có thể được fit trên log1p(target), không phải nhất thiết trên giá trị gốc.
 

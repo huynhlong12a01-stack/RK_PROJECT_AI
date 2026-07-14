@@ -1,0 +1,39 @@
+# Generic target metadata example for the RK engine.
+# Lab values stay in the point CSV. This file declares meaning and governance.
+# `confirmed: false` allows a continuous draft surface but blocks acceptance,
+# classification and fertilizer recommendations.
+
+schema_version: 1
+product_policy:
+  nutrient_content_maps_only: true
+  fertilizer_recommendation_enabled: false
+
+targets:
+  # A legacy CSV column named pH remains ambiguous until its lab method is set.
+  pH:
+    confirmed: false
+    profile_name: pH_H2O
+    unit: "pH unit"
+    laboratory_method: "pH in water"
+    extraction_ratio: "1:2.5"
+    crop:
+    region:
+    classification:
+      approved: false
+      source:
+      version:
+      approved_by:
+
+  P_Olsen_mgkg:
+    confirmed: false
+    profile_name: P_Olsen_mgkg
+    unit: mg/kg
+    laboratory_method: Olsen
+    extraction_ratio: "1:20"
+    crop:
+    region:
+    classification:
+      approved: false
+      source:
+      version:
+      approved_by:

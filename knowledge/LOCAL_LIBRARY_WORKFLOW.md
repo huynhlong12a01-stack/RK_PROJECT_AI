@@ -1,70 +1,39 @@
-# Local Research Library Workflow
+# Workflow thư viện tài liệu local
 
-Thu m?c `knowledge/library/` d�nh cho t�i li?u b?n c� quy?n s? d?ng h?p ph�p: PDF t? thu vi?n tru?ng, t�i li?u open-access, guideline c�ng khai, ho?c t�i li?u do b?n t? t?o.
+Phần này chỉ dành cho PDF/TXT/MD/HTML mà người dùng có quyền sử dụng. Không tải hoặc chia sẻ tài liệu có bản quyền trái phép.
 
-Thu m?c n�y b? Git ignore. Kh�ng commit PDF/raw full text v�o repository.
+## Hai corpus tách biệt
 
-## Quy tr�nh d? xu?t
+- Curated: metadata, tóm tắt tự viết và evidence cards trong repository. Dùng run_rag_build_curated_index.ps1.
+- Local/private: tài liệu trong knowledge/library, bị Git ignore. Dùng inventory và local index khi thật sự cần đọc toàn văn.
 
-1. B?n t? t?i t�i li?u b?ng quy?n truy c?p h?p ph�p c?a m�nh.
-2. �?t file v�o `knowledge/library/`, c� th? chia thu m?c theo ch? d?:
+Curated corpus là mặc định vì có DOI/URL và giới hạn sử dụng rõ. Local corpus không tự trở thành nguồn core.
 
-```text
-knowledge/library/geostatistics/
-knowledge/library/regression_kriging/
-knowledge/library/digital_soil_mapping/
-knowledge/library/spatial_cv/
-knowledge/library/soil_nutrients/
-knowledge/library/uncertainty/
-```
+## Quy trình local
 
-3. Ch?y ki?m k�:
+1. Đặt tài liệu hợp pháp vào knowledge/library theo thư mục chủ đề.
+2. Chạy:
 
-```powershell
-.\run_rag_inventory.ps1
-```
+       .\run_rag_inventory.ps1
 
-4. M? file draft metadata v� b? sung DOI, t�c gi?, nam, tag:
+3. Mở knowledge/metadata/local_library_inventory.csv và kiểm tra title, tác giả, năm, DOI/URL, quyền sử dụng. needs_review không được xem là bằng chứng đã xác minh.
+4. Tạo private chunks:
 
-```text
-knowledge/metadata/local_source_metadata_draft.csv
-```
+       .\run_rag_build_local_index.ps1
 
-5. N?u m�y c� package R `pdftools`, t?o local chunks:
+5. Tra cứu file local cụ thể bằng cách truyền đường dẫn chunks nếu cần:
 
-```powershell
-.\run_rag_build_local_index.ps1
-```
+       .\run_rag_query.ps1 -Query "variogram residual" -Chunks "knowledge/index/local_chunks/chunks.jsonl"
 
-6. Ch?y smoke test:
+## Giới hạn
 
-```powershell
-.\run_rag_smoke_test.ps1
-```
+- PDF cần package pdftools trong R.
+- DOCX có thể xuất hiện trong inventory nhưng builder chỉ hỗ trợ loại file mà log xác nhận đã đọc.
+- Chunk local theo ký tự không thay page/heading citation.
+- Kết quả lexical chỉ là danh sách ứng viên để kiểm tra.
+- Không commit knowledge/library hoặc knowledge/index/local_chunks.
+- Không trích dài toàn văn; luôn quay về DOI/URL và điều khoản nguồn.
 
-## Nguy�n t?c b?n quy?n
+## Khi nào cập nhật curated knowledge
 
-- Kh�ng commit PDF/raw text/chunks v�o Git.
-- Kh�ng chia s? l?i full text.
-- Kh�ng tr�ch d?n ngu?n n?u metadata chua ki?m ch?ng.
-- Kh�ng t?o citation gi?.
-- Ch? d�ng n?i b? cho nghi�n c?u/h?c thu?t theo quy?n truy c?p c?a b?n.
-
-## Khi b�o c�o
-
-RAG c� th? d�ng n?i dung local d? h? tr? hi?u t�i li?u, nhung report n�n tr�ch d?n b?ng DOI/URL/doc_id d� ki?m ch?ng trong metadata.
-## Truy v?n kho RAG c?c b?
-
-Sau khi d� ch?y inventory v� build local chunks, c� th? truy v?n nhanh b?ng keyword scoring minh b?ch:
-
-```powershell
-.\run_rag_query.ps1 -Query "spatial cross-validation variogram range" -TopK 8
-```
-
-Output:
-
-```text
-agent/responses/rag_query_result.json
-```
-
-C�ng c? n�y kh�ng g?i LLM v� kh�ng g?i t�i li?u ra ngo�i. N� ch? t�m do?n li�n quan trong `knowledge/index/local_chunks/chunks.jsonl`. K?t qu? l� evidence candidates d? agent d?c ti?p, kh�ng ph?i k?t lu?n khoa h?c cu?i c�ng.
+Chỉ tạo evidence card sau khi metadata đã được xác minh và luận điểm có phạm vi/giới hạn rõ. Dùng run_rag_smoke_test.ps1 để kiểm tra source id, taxonomy và schema trước khi build lại curated index.

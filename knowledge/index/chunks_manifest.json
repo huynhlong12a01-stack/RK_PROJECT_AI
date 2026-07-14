@@ -1,8 +1,11 @@
 {
-  "status": "not_built",
-  "created_at": null,
-  "chunking_method": null,
+  "status": "completed",
+  "index_type": "curated_lexical_with_vietnamese_english_aliases",
+  "canonical_manifest": "knowledge/index/curated/manifest.json",
+  "chunks_file": "knowledge/index/curated/chunks.jsonl",
+  "n_sources": 58,
+  "n_evidence_cards": 25,
+  "n_chunks": 83,
   "embedding_model": null,
-  "source_metadata": "knowledge/metadata/sources.csv",
-  "notes": "No vector index is built yet. Start with metadata and evidence-card retrieval."
+  "notes": "Curated retrieval is active; private local chunks remain optional."
 }

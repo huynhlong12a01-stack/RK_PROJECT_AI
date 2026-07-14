@@ -54,15 +54,40 @@ make_iteration_request <- function(base_request, target_field, run_id, max_itera
 result_warning_count <- function(result) length(result$warnings %||% character(0))
 
 result_has_severe_warning <- function(result) {
+  if (length(result$hard_failures %||% character(0)) > 0) return(TRUE)
+  nug_ratio <- as_num(result$variogram$nugget_sill_ratio)
+  if (identical(
+      result$prediction_method %||% "",
+      "regression_only_pure_nugget_fallback") ||
+      identical(result$variogram$model %||% "", "Nug") ||
+      (is.finite(nug_ratio) && nug_ratio >= 0.95)) {
+    return(TRUE)
+  }
+  if (!isTRUE(result$cross_validation$strict_outer_cv)) return(TRUE)
+  if (isTRUE(result$variogram$singular) ||
+      isTRUE(result$variogram$range_hit_max)) return(TRUE)
+  stable_fraction <- as_num(
+    result$cross_validation$stability$rk_better_than_regression_fraction)
+  if (is.finite(stable_fraction) && stable_fraction < 0.80) return(TRUE)
+  outside_aoa <- as_num(result$extrapolation$outside_aoa_percent)
+  if (is.finite(outside_aoa) && outside_aoa > 40) return(TRUE)
+  clipped <- as_num(result$clipping$total_clipped_percent)
+  if (is.finite(clipped) && clipped > 20) return(TRUE)
   txt <- paste(result$warnings %||% character(0), collapse = " ")
-  grepl("R²_pred âm|R2_pred am|range.*max|Range hits maximum|Nugget/Sill is high|không tìm được candidate|No valid variogram|in-sample", txt, ignore.case = TRUE)
+  grepl(
+    "R²_pred âm|R2_pred am|không tìm được candidate|No valid variogram|in-sample",
+    txt, ignore.case = TRUE
+  )
 }
 
 should_accept_result <- function(result) {
   grade <- result$quality$final_grade %||% NA_character_
   hint <- result$quality$decision_hint %||% NA_character_
   r2 <- as_num(result$metrics$rk_r2_pred)
-  grade %in% c("A", "B") && identical(hint, "ACCEPTABLE") && is.finite(r2) && r2 > 0 && !result_has_severe_warning(result)
+  grade %in% c("A", "B") && identical(hint, "ACCEPTABLE") &&
+    isTRUE(result$cross_validation$strict_outer_cv) &&
+    length(result$hard_failures %||% character(0)) == 0 &&
+    is.finite(r2) && r2 > 0 && !result_has_severe_warning(result)
 }
 
 result_csv_path <- function(result, key, fallback = NULL) {
@@ -152,27 +177,57 @@ result_r2_negative_streak <- function(results, n = 2L) {
   if (length(results) < n) return(FALSE)
   tail_results <- tail(results, n)
   vals <- vapply(tail_results, function(x) as_num(x$metrics$rk_r2_pred), numeric(1))
-  all(is.finite(vals) & vals < 0)
+  all(is.finite(vals) & vals <= 0)
 }
 
 diagnostics_improved <- function(previous, current) {
   reasons <- character(0)
   prev_nug <- as_num(previous$variogram$nugget_sill_ratio)
   curr_nug <- as_num(current$variogram$nugget_sill_ratio)
-  if (is.finite(prev_nug) && is.finite(curr_nug) && curr_nug <= prev_nug - 0.05) reasons <- c(reasons, "nugget_sill_decreased")
-  if (isTRUE(previous$variogram$range_hit_max) && !isTRUE(current$variogram$range_hit_max)) reasons <- c(reasons, "range_no_longer_hits_max")
+  if (is.finite(prev_nug) && is.finite(curr_nug) &&
+      curr_nug <= prev_nug - 0.05) {
+    reasons <- c(reasons, "nugget_sill_decreased")
+  }
+  if (isTRUE(previous$variogram$range_hit_max) &&
+      !isTRUE(current$variogram$range_hit_max)) {
+    reasons <- c(reasons, "range_no_longer_hits_max")
+  }
+  if (isTRUE(previous$variogram$singular) &&
+      !isTRUE(current$variogram$singular)) {
+    reasons <- c(reasons, "variogram_no_longer_singular")
+  }
   prev_class <- as_num(previous$class_evaluation$class_accuracy)
   curr_class <- as_num(current$class_evaluation$class_accuracy)
-  if (is.finite(prev_class) && is.finite(curr_class) && curr_class >= prev_class + 0.03) reasons <- c(reasons, "class_accuracy_improved")
+  if (is.finite(prev_class) && is.finite(curr_class) &&
+      curr_class >= prev_class + 0.03) {
+    reasons <- c(reasons, "class_accuracy_improved")
+  }
   prev_severe <- as_num(previous$class_evaluation$severe_misclassification_rate)
   curr_severe <- as_num(current$class_evaluation$severe_misclassification_rate)
-  if (is.finite(prev_severe) && is.finite(curr_severe) && curr_severe <= prev_severe - 0.03) reasons <- c(reasons, "severe_misclassification_decreased")
-  prev_unc <- as_num(previous$uncertainty$high_uncertainty_area_percent)
-  curr_unc <- as_num(current$uncertainty$high_uncertainty_area_percent)
-  if (is.finite(prev_unc) && is.finite(curr_unc) && curr_unc <= prev_unc - 5) reasons <- c(reasons, "high_uncertainty_area_decreased")
+  if (is.finite(prev_severe) && is.finite(curr_severe) &&
+      curr_severe <= prev_severe - 0.03) {
+    reasons <- c(reasons, "severe_misclassification_decreased")
+  }
+  prev_aoa <- as_num(previous$extrapolation$outside_aoa_percent)
+  curr_aoa <- as_num(current$extrapolation$outside_aoa_percent)
+  if (is.finite(prev_aoa) && is.finite(curr_aoa) &&
+      curr_aoa <= prev_aoa - 5) reasons <- c(reasons, "outside_aoa_decreased")
+  prev_clip <- as_num(previous$clipping$total_clipped_percent)
+  curr_clip <- as_num(current$clipping$total_clipped_percent)
+  if (is.finite(prev_clip) && is.finite(curr_clip) &&
+      curr_clip <= prev_clip - 5) reasons <- c(reasons, "clipping_decreased")
+  prev_stable <- as_num(
+    previous$cross_validation$stability$rk_better_than_regression_fraction)
+  curr_stable <- as_num(
+    current$cross_validation$stability$rk_better_than_regression_fraction)
+  if (is.finite(prev_stable) && is.finite(curr_stable) &&
+      curr_stable >= prev_stable + 0.10) {
+    reasons <- c(reasons, "outer_repeat_stability_improved")
+  }
   prev_r2 <- as_num(previous$metrics$rk_r2_pred)
   curr_r2 <- as_num(current$metrics$rk_r2_pred)
-  if (is.finite(prev_r2) && is.finite(curr_r2) && curr_r2 >= prev_r2 + 0.05) reasons <- c(reasons, "r2_pred_improved")
+  if (is.finite(prev_r2) && is.finite(curr_r2) &&
+      curr_r2 >= prev_r2 + 0.05) reasons <- c(reasons, "r2_pred_improved")
   list(improved = length(reasons) > 0, reasons = reasons)
 }
 
@@ -248,7 +303,11 @@ write_decision_packet <- function(result, request, rag_context_file, loop_dir, i
     variogram = result$variogram %||% list(),
     class_evaluation = result$class_evaluation %||% list(),
     uncertainty = result$uncertainty %||% list(),
+    extrapolation = result$extrapolation %||% list(),
+    clipping = result$clipping %||% list(),
+    messages = result$messages %||% character(0),
     warnings = result$warnings %||% character(0),
+    hard_failures = result$hard_failures %||% character(0),
     recommendations = result$recommendations %||% character(0),
     files = result$files %||% list()
   )
@@ -313,6 +372,31 @@ heuristic_decision <- function(result, request, iter_index, max_more_iterations 
   current_nmax <- as_num(kr$selected_nmax_neighbors %||% p$NMAX_NEIGHBORS, p$NMAX_NEIGHBORS %||% 12)
   nug_ratio <- as_num(vg$nugget_sill_ratio)
   r2 <- as_num(result$metrics$rk_r2_pred)
+  pure_nugget <- identical(
+    result$prediction_method %||% "",
+    "regression_only_pure_nugget_fallback"
+  ) ||
+    identical(vg$model %||% "", "Nug") ||
+    (is.finite(nug_ratio) && nug_ratio >= 0.95)
+  if (pure_nugget) {
+    return(list(
+      decision = "MANUAL_REVIEW",
+      confidence = "high",
+      reason = paste0(
+        "Residual variogram is pure nugget. The engine correctly reduced ",
+        "RK to regression-only; forcing a manual structured variogram would ",
+        "create unsupported spatial signal. Inspect residual trend, outliers, ",
+        "sampling support, laboratory noise and covariates before rerunning."
+      ),
+      next_parameters = list(),
+      must_keep = list(
+        RUN_CROSS_VALIDATION = TRUE,
+        CV_METHODS = c("spatial_kmeans")
+      ),
+      stop_condition = list(max_more_iterations = 0),
+      human_review_required = TRUE
+    ))
+  }
 
   next_params <- list()
   reason_bits <- c(paste0("Local heuristic after iteration ", iter_index, ": used run_result diagnostics."))
@@ -422,7 +506,7 @@ base_request <- agent_read_json(request_template)
 target_field <- args$target %||% base_request$target_field %||% ""
 if (!nzchar(target_field) || identical(target_field, "auto")) {
   source("scripts/00_config.R")
-  target_field <- if (!is.null(TARGET_FIELD) && !identical(TARGET_FIELD, "auto")) TARGET_FIELD else "pH"
+  target_field <- if (!is.null(TARGET_FIELD) && !identical(TARGET_FIELD, "auto")) TARGET_FIELD else "pH_H2O"
 }
 
 target_name <- agent_safe_name(target_field)
@@ -469,7 +553,7 @@ last_request_file <- NULL
 last_result <- NULL
 
 for (iter in seq_len(max_iterations)) {
-  run_id <- sprintf("%s_%s_iter_%03d", target_name, loop_id, iter)
+  run_id <- sprintf("%s_iter_%03d", loop_id, iter)
   req <- make_iteration_request(base_request, target_field, run_id, max_iterations, accepted_parameters, output_root)
   req_file <- file.path(requests_dir, paste0("run_request_", run_id, ".json"))
   agent_write_json(req, req_file)
@@ -593,10 +677,23 @@ for (iter in seq_len(max_iterations)) {
   }
 
   if (identical(validated$decision, "ACCEPT")) {
-    stop_reason <- "AI_ACCEPTED_RESULT"
-    final_decision <- "FINAL_ACCEPT"
-    human_review_required <- FALSE
-    iteration_rows[[length(iteration_rows) + 1L]] <- data.frame(iteration = iter, run_id = run_id, status = result$status %||% "unknown", rmse = rmse, r2_pred = r2, warnings = warn_n, decision = stop_reason, request = agent_norm_path(req_file), result_file = agent_norm_path(response_file), stringsAsFactors = FALSE)
+    if (should_accept_result(result)) {
+      stop_reason <- "AI_ACCEPTED_RESULT"
+      final_decision <- "FINAL_ACCEPT"
+      human_review_required <- FALSE
+    } else {
+      stop_reason <- "AI_ACCEPT_BLOCKED_BY_SCIENTIFIC_RULES"
+      final_decision <- "MANUAL_REVIEW"
+      human_review_required <- TRUE
+    }
+    iteration_rows[[length(iteration_rows) + 1L]] <- data.frame(
+      iteration = iter, run_id = run_id,
+      status = result$status %||% "unknown", rmse = rmse, r2_pred = r2,
+      warnings = warn_n, decision = stop_reason,
+      request = agent_norm_path(req_file),
+      result_file = agent_norm_path(response_file),
+      stringsAsFactors = FALSE
+    )
     break
   }
   if (validated$decision %in% c("MANUAL_REVIEW", "REJECT")) {
@@ -654,7 +751,8 @@ final <- list(
   decisions_dir = agent_norm_path(decisions_dir)
 )
 
-final_file <- file.path("agent", "responses", paste0("final_decision_", target_name, "_", loop_id, ".json"))
+final_file <- file.path(
+  "agent", "responses", paste0("final_decision_", loop_id, ".json"))
 history_final_file <- file.path(loop_dir, "final_decision.json")
 agent_write_json(final, final_file)
 agent_write_json(final, history_final_file)

@@ -10,10 +10,17 @@ RK_DEPENDENCIES <- list(
     "sp",
     "jsonlite",
     "digest",
-    "yaml"
+    "yaml",
+    "blockCV",
+    "CAST",
+    "lmtest"
+  ),
+  sampling_design = c(
+    "clhs"
   ),
   tidy_io = c(
     "readr",
+    "openxlsx2",
     "dplyr",
     "purrr",
     "stringr",

@@ -1,0 +1,20 @@
+{
+  "claim_id": "probability_validation_vs_spatial_cv_001",
+  "claim": "Nested spatial cross-validation provides held-out model-selection or spatial-transfer evidence, but it is not the same as independent probability-sample validation used to estimate map accuracy without design bias.",
+  "applies_to": [
+    "validation",
+    "spatial_cross_validation",
+    "probability_sampling",
+    "map_accuracy"
+  ],
+  "evidence_sources": [
+    "brus_kempen_heuvelink_2011_validation",
+    "wadoux_2021_spatial_cv_map_accuracy",
+    "roberts_2017_spatial_cv"
+  ],
+  "strength": "strong",
+  "conditions": "Use nested spatial CV for comparing PC_ONLY, PC_PLUS_SOIL, regression-only, ordinary kriging and regression kriging under a defined transfer task.",
+  "limitations": "Accuracy estimates depend on fold geometry and transfer distance; independent probability validation requires new field observations selected for that purpose.",
+  "recommended_action": "Label current metrics outer held-out nested spatial CV; if unbiased map-accuracy estimates are required, reserve or collect an independent probability sample.",
+  "not_allowed_action": "Do not describe outer CV folds as an independent field validation dataset."
+}

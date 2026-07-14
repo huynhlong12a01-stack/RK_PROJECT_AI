@@ -128,11 +128,11 @@ agent_validate_parameter <- function(name, value, safety_limits = list()) {
     vals <- suppressWarnings(as.numeric(val_vec))
     if (length(vals) == 0 || any(!is.finite(vals)) || any(vals < safety$min_range) || any(vals > safety$max_range)) err <- "AUTO_NEIGHBOR_SEARCH_RADIUS_CANDIDATES is outside safety limits."
   }
-  if (name == "AUTO_NEIGHBOR_CV_METHOD" && !(value %in% c("random", "spatial_kmeans"))) err <- "AUTO_NEIGHBOR_CV_METHOD must be random or spatial_kmeans."
+  if (name == "AUTO_NEIGHBOR_CV_METHOD" && !(value %in% c("random", "spatial_kmeans", "spatial_block"))) err <- "AUTO_NEIGHBOR_CV_METHOD must be random, spatial_kmeans, or spatial_block."
   if (name == "AUTO_NEIGHBOR_MAX_CANDIDATES" && (!int1(value) || value < 1 || value > 250)) err <- "AUTO_NEIGHBOR_MAX_CANDIDATES must be an integer from 1 to 250."
   if (name == "NMAX_NEIGHBORS" && (!int1(value) || value < safety$min_neighbors || value > safety$max_neighbors)) err <- "NMAX_NEIGHBORS is outside safety limits."
   if (name == "CV_K_FOLDS" && (!int1(value) || value < 2 || value > 20)) err <- "CV_K_FOLDS must be an integer from 2 to 20."
-  if (name == "CV_METHODS" && (!all(val_vec %in% c("random", "spatial_kmeans")) || length(val_vec) == 0)) err <- "CV_METHODS must contain random and/or spatial_kmeans."
+  if (name == "CV_METHODS" && (!all(val_vec %in% c("random", "spatial_kmeans", "spatial_block")) || length(val_vec) == 0)) err <- "CV_METHODS may contain random, spatial_kmeans, and/or spatial_block."
   if (name == "CLAMP_TO_SAMPLE_RANGE" && (!is.logical(value) || length(value) != 1)) err <- "CLAMP_TO_SAMPLE_RANGE must be true or false."
   if (name == "TARGET_TRANSFORM" && !(value %in% c("auto", "none", "log1p"))) err <- "TARGET_TRANSFORM must be auto, none, or log1p."
   if (name == "LOG_BACKTRANSFORM_BIAS_CORRECTION" && (!is.logical(value) || length(value) != 1)) err <- "LOG_BACKTRANSFORM_BIAS_CORRECTION must be true or false."
@@ -183,7 +183,7 @@ agent_write_csv <- function(x, path) {
   invisible(path)
 }
 
-agent_pick_model_metric <- function(model_comparison, model, field = "RMSE", preferred_method = "spatial_kmeans") {
+agent_pick_model_metric <- function(model_comparison, model, field = "RMSE", preferred_method = "nested_spatial_block") {
   if (is.null(model_comparison) || nrow(model_comparison) == 0) return(NA_real_)
   d <- model_comparison
   if (!(field %in% names(d)) || !("model" %in% names(d))) return(NA_real_)
@@ -196,9 +196,37 @@ agent_pick_model_metric <- function(model_comparison, model, field = "RMSE", pre
 agent_decision_hint <- function(result) {
   grade <- result$quality$final_grade %||% NA_character_
   warnings <- paste(result$warnings %||% character(0), collapse = " ")
-  r2 <- result$metrics$rk_r2_pred %||% NA_real_
-  if (is.finite(r2) && r2 < 0) return("MANUAL_REVIEW_REQUIRED")
-  if (grepl("Range chạm|Range cham|fit ép|fit ep|không cải thiện|khong cai thien|R²_pred âm|R2_pred am|không tìm được candidate|khong co candidate", warnings, ignore.case = TRUE)) return("RERUN_RECOMMENDED")
+  hard_failures <- result$hard_failures %||% character(0)
+  r2 <- suppressWarnings(as.numeric(result$metrics$rk_r2_pred %||% NA_real_))
+  nug_ratio <- suppressWarnings(as.numeric(
+    result$variogram$nugget_sill_ratio %||% NA_real_))
+  pure_nugget <- identical(
+    result$prediction_method %||% "",
+    "regression_only_pure_nugget_fallback"
+  ) ||
+    identical(result$variogram$model %||% "", "Nug") ||
+    (is.finite(nug_ratio) && nug_ratio >= 0.95)
+  if (pure_nugget) return("MANUAL_REVIEW_REQUIRED")
+  if (length(hard_failures) > 0) return("MANUAL_REVIEW_REQUIRED")
+  if (!isTRUE(result$cross_validation$strict_outer_cv)) {
+    return("MANUAL_REVIEW_REQUIRED")
+  }
+  if (is.finite(r2) && r2 <= 0) return("MANUAL_REVIEW_REQUIRED")
+  if (isTRUE(result$variogram$singular) ||
+      isTRUE(result$variogram$range_hit_max)) {
+    return("MANUAL_REVIEW_REQUIRED")
+  }
+  stable_fraction <- suppressWarnings(as.numeric(
+    result$cross_validation$stability$rk_better_than_regression_fraction %||%
+      NA_real_))
+  if (is.finite(stable_fraction) && stable_fraction < 0.80) {
+    return("MANUAL_REVIEW_REQUIRED")
+  }
+  if (grepl(
+      "không cải thiện|khong cai thien|không tìm được candidate|khong co candidate",
+      warnings, ignore.case = TRUE)) {
+    return("RERUN_RECOMMENDED")
+  }
   if (grade %in% c("A", "B")) return("ACCEPTABLE")
   "RERUN_RECOMMENDED"
 }

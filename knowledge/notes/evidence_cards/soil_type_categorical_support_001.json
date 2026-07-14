@@ -1,0 +1,19 @@
+{
+  "claim_id": "soil_type_categorical_support_001",
+  "claim": "Soil Type is a categorical predictor; numeric class codes must not be interpreted as ordered continuous values, and predictions for classes with weak or no sample support require explicit warning.",
+  "applies_to": [
+    "soil_type_covariate",
+    "categorical_predictor",
+    "interpolation_modeling",
+    "sample_design"
+  ],
+  "evidence_sources": [
+    "fao_2022_gsnmap",
+    "mcbratney_2003_dsm"
+  ],
+  "strength": "moderate",
+  "conditions": "The project represents soil classes with dummy variables and groups locations not covered by the soil polygon as Other.",
+  "limitations": "Other may combine heterogeneous causes such as outside coverage, unmapped soil and topology gaps; it is not a pedological class.",
+  "recommended_action": "Use categorical encoding, report sample counts by class and compare PC_ONLY with PC_PLUS_SOIL using nested spatial validation.",
+  "not_allowed_action": "Do not use the raw soil class code as a continuous covariate or assume that Other is a homogeneous soil class."
+}

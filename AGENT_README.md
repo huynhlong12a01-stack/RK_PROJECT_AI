@@ -1,215 +1,70 @@
-# AI Agent Workflow For Regression Kriging
+# AI Agent Guide — RK_R_Project
 
-Tài liệu này dành cho Codex hoặc AI agent khi làm việc trong dự án R Regression Kriging. Mục tiêu là chạy workflow có kiểm soát, đọc output JSON, đề xuất tham số hợp lệ, so sánh iteration và chọn kết quả đáng tin theo tiêu chí khoa học.
+Tài liệu này định hướng AI agent. Hướng dẫn người dùng bắt đầu tại `docs/00_MUC_LUC.md`.
 
-## 0. Dependency Gate
+## Luồng chính
 
-Luôn kiểm tra môi trường trước khi chạy thật:
+Mỗi project có ba giai đoạn:
 
-```powershell
-.\check_dependencies.ps1 -Profile "core,agent"
-```
+1. `00_XAC_LAP_VUNG_MIA`: dùng `ROI_field_area` có sẵn, hoặc `ROI_search` + nhãn đã kiểm chứng để tạo vùng ứng viên và yêu cầu review.
+2. `01_THIET_KE_LAY_MAU`: ROI đã duyệt + Soil Type tùy chọn -> covariates -> PCA reference -> REDUCED/FULL.
+3. `02_NOI_SUY_BAN_DO`: `sample_actual` + lab -> predictor -> PC_ONLY/PC_PLUS_SOIL -> validation -> maps/reports/tables.
 
-Nếu cần RAG hoặc xử lý bảng nâng cao:
-
-```powershell
-.\check_dependencies.ps1 -Profile "tidy_io,rag"
-```
-
-Nếu thiếu package và người dùng cho phép:
-
-```powershell
-.\install_dependencies.ps1 -Profile "core,agent"
-.\install_dependencies.ps1 -Profile "tidy_io,rag"
-.\install_dependencies.ps1 -Profile "geostat_extra,spatial_cv,modeling"
-```
-
-Không chạy RK thật khi thiếu `sf`, `terra`, `gstat`, `sp`, `jsonlite`, `readr`. Không tự gọi `install.packages()` rời rạc nếu wrapper còn hoạt động.
-
-## 1. Entry Points
-
-- Config chính: `scripts/00_config.R`.
-- Engine RK: `scripts/main.R`.
-- Agent single-run: `run_agent.ps1` -> `scripts/agent_run.R`.
-- Batch nhiều chỉ tiêu: `run_agent_batch.ps1` -> `scripts/agent_batch_run.R`.
-- Agent loop có kiểm soát: `run_agent_loop.ps1` -> `scripts/agent_loop.R`.
-- Validator: `scripts/agent_validate_decision.R`.
-- Compare: `scripts/agent_compare_runs.R` hoặc `run_agent_compare.ps1`.
-- Evaluation rules: `rk_evaluation/evaluation.R`.
-- Request template: `agent/requests/run_request_template.json`.
-
-## 2. Workflow Chuẩn
-
-1. Kiểm tra Git status.
-2. Đọc `README.md`, `AGENT_README.md`, `scripts/00_config.R`.
-3. Chạy dependency gate.
-4. Kiểm tra schema input bằng `validate_point_schema.ps1` và `validate_raster_schema.ps1`.
-5. Chọn batch, single-agent, controlled loop hoặc normal RK.
-6. Đọc `run_result.json` và report JSON/CSV.
-7. Nếu cần RERUN, tạo `ai_decision.json` đúng whitelist.
-8. Chạy validator trước khi tạo request mới.
-9. Dừng theo stop conditions, không chạy vô hạn.
-10. So sánh run bằng `agent_compare_runs.R` nếu có từ 2 run trở lên; luôn lọc bằng `--target`, `--run_prefix`, `--source_contains` hoặc dùng thư mục `agent/history/<loop_id>/results`.
-
-## 3. Khi Nào Dùng Workflow Nào
-
-Batch nhiều chỉ tiêu:
-
-```powershell
-.\run_agent_batch.ps1
-.\run_agent_batch.ps1 -Targets "pH,Humus,CEC"
-```
-
-Single target:
-
-```powershell
-.\run_agent.ps1 -Target pH -Request agent\requests\run_request_template.json
-```
-
-Controlled loop:
-
-```powershell
-.\run_agent_loop.ps1 -Target pH -MaxIterations 3
-.\run_agent_loop.ps1 -Target pH -MaxIterations 3 -AutoDecision
-```
-
-Không có OpenAI/API trong loop này. Nếu không bật `-AutoDecision`, loop sẽ dừng ở `WAITING_FOR_AI_DECISION` và ghi file cần thiết trong `agent/decisions/<loop_id>/` để agent bên ngoài điền quyết định.
-
-Normal RK:
-
-```powershell
-.\run_rk.bat
-```
-
-## 4. Output Cần Đọc
-
-Ưu tiên:
+Entry point:
 
 ```text
-agent/responses/<run_id>_run_result.json
-agent/responses/final_decision_<target>_<loop_id>.json
-agent/history/<loop_id>/rag_context_iter_001.json
-agent/history/<loop_id>/decision_packet_iter_001.md
-output/agent_runs/<run_id>/06_report/json/evaluation_<target>.json
-output/agent_runs/<run_id>/06_report/tables/model_comparison_<target>.csv
-output/agent_runs/<run_id>/06_report/tables/cv_results_<target>.csv
-output/agent_runs/<run_id>/06_report/tables/neighbor_tuning_<target>.csv
-output/agent_runs/<run_id>/03_variogram/variogram_candidate_results_<target>.csv
-output/agent_runs/<run_id>/06_report/interactive/variogram_interactive_<target>.html
+projects/TEN_DU_AN/RUN.ps1 status
+projects/TEN_DU_AN/RUN.ps1 interpret
+projects/TEN_DU_AN/RUN.ps1 design
+projects/TEN_DU_AN/RUN.ps1 interpolate
 ```
 
-## 5. Nguyên Tắc Khoa Học
+BAT người dùng chỉ gọi các action này. Không dùng `run_rk.bat` hoặc `output/agent_runs` làm entry point mặc định.
 
-Không chọn mô hình chỉ vì RMSE thấp nhất. Cần xét:
+## Phân quyền thư mục
 
-- R²_pred dương.
-- ME gần 0.
-- RK cải thiện so với regression-only.
-- RK không kém rõ so với Ordinary Kriging.
-- Nugget/Sill không quá cao.
-- Range không chạm max và không quá dài so với cutoff.
-- Ít cảnh báo nghiêm trọng.
-- Class accuracy hợp lý nếu chỉ tiêu có phân cấp.
-- Uncertainty hợp lý nếu có.
-- Transform đã dùng có phù hợp phân phối chỉ tiêu không.
-
-Dữ liệu random/test không dùng để chứng minh RK tốt hơn; chỉ dùng để kiểm tra workflow.
-
-## 6. Whitelist Tham Số AI Được Đổi
+Người dùng chỉnh:
 
 ```text
-VARIOGRAM_MODE
-VARIOGRAM_MODEL
-MANUAL_NUGGET
-MANUAL_PSILL
-MANUAL_RANGE
-VARIOGRAM_CUTOFF
-VARIOGRAM_WIDTH
-VARIOGRAM_RANGE_MIN
-VARIOGRAM_RANGE_MAX
-NMAX_NEIGHBORS
-SEARCH_RADIUS
-AUTO_NEIGHBORS
-AUTO_NEIGHBOR_NMAX_CANDIDATES
-AUTO_NEIGHBOR_SEARCH_RADIUS_CANDIDATES
-AUTO_NEIGHBOR_CV_METHOD
-AUTO_NEIGHBOR_MAX_CANDIDATES
-CV_METHODS
-CV_K_FOLDS
-CLAMP_TO_SAMPLE_RANGE
-TARGET_TRANSFORM
-LOG_BACKTRANSFORM_BIAS_CORRECTION
+projects/TEN_DU_AN/00_XAC_LAP_VUNG_MIA/01_DAU_VAO
+projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/01_DAU_VAO
+projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/01_DAU_VAO/sample_actual.csv
+projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/01_DAU_VAO/indicator_metadata.yml
 ```
 
-`TARGET_TRANSFORM` đã được implement trong engine với giá trị hợp lệ `auto`, `none`, `log1p`. Khi dùng `log1p`, engine fit regression và kriging residual trên thang transform, back-transform prediction về đơn vị gốc, và tính CV metric trên đơn vị gốc. OK baseline cũng fit trên cùng thang transform rồi back-transform trước khi tính metric. Nếu profile yêu cầu không âm và dữ liệu âm, engine fallback về `none` và ghi cảnh báo. `LOG_BACKTRANSFORM_BIAS_CORRECTION` là tùy chọn boolean; khi `TRUE`, OK/RK dùng xấp xỉ `exp(mu + 0.5*sigma^2) - 1` nếu có variance trên model scale.
+Ứng dụng xuất vào các thư mục `02_KET_QUA`. Mã, work, cache và model trung gian nằm trong `_NOI_BO`; không yêu cầu người dùng sửa.
 
-## 7. Protected Settings
+## Scientific invariants
 
-AI không được tự ý thay đổi:
+- `roi_field_area_candidate` không tự được phê duyệt; chỉ ROI đã review đi vào thiết kế.
+- AKS reference là `positive_reference_only`, không phải binary pretrained model. Dự án đích cần nhãn dương/âm địa phương, phenology gate và outer spatial test riêng.
+- Chỉ `clhs_core` từ backend CRAN là đầu ra optimizer gốc. FULL là hybrid sau spatial infill/short-lag; fallback `lhs_core` phải giữ nhãn cLHS-like.
+- cLHS là simulated annealing ngẫu nhiên, không chứng minh global optimum; tọa độ không nằm trong objective gốc.
+- REDUCED là tập con FULL; không hứa chất lượng tương đương.
+- PCA reference fit ở workflow 1 và đóng băng; năm covariates -> PC1–PC5 không phải giảm chiều.
+- Lưới 10 m không nâng native/effective resolution của nguồn thô hơn.
+- `sample_actual` dùng GPS thật; điểm ngoài ROI cần target population, support, covariate coverage, AOA và sensitivity. Chúng không tự động là validation set.
+- Soil Type là categorical; `Other` là nhóm kỹ thuật.
+- So PC_ONLY và PC_PLUS_SOIL bằng outer held-out nested spatial CV cùng baseline; outer CV không phải independent field validation.
+- Pure nugget dẫn đến regression-only fallback.
+- RK residual SD không phải total calibrated uncertainty.
+- Target phải có method/unit; nutrient map không tự động là fertilizer recommendation.
+
+## Tài liệu bắt buộc đọc
 
 ```text
-POINT_FILE
-RASTER_DIR
-ROI_FILE
-UTM_EPSG
-EXPORT_EPSG
-CODE_COL
-LAT_COL
-LON_COL
-RASTER_PATTERN
-OUTPUT_RESOLUTION
-USE_COMPLETE_PC_MASK
-REGRESSION_FORMULA
-raw input data
-source scripts
-main engine logic
+docs/EXECUTING_PROMPT.md
+docs/SCIENTIFIC_VALIDATION.md
+knowledge/README.md
+knowledge/CATALOG.md
 ```
 
-## 8. Auto-Neighbor Và Candidate Tables
+## Thay đổi code
 
-Mặc định bật `AUTO_NEIGHBORS <- TRUE`. Khi báo cáo kết quả, luôn nêu:
+- Kiểm tra git status trước/sau và giữ thay đổi của người dùng.
+- Dùng template trong `docs/templates` khi thay generator.
+- Chạy parse/smoke test liên quan.
+- Không commit dữ liệu riêng tư, cache hoặc sản phẩm dự án.
+- Chỉ commit/push khi người dùng yêu cầu.
 
-```text
-selected_nmax_neighbors
-selected_search_radius
-auto_neighbors_method
-neighbor_tuning file
-variogram_candidate_results file
-```
-
-Agent loop hiện đọc thêm `neighbor_tuning_<target>.csv` và `variogram_candidate_results_<target>.csv` nếu có để đề xuất rerun cụ thể hơn. Không chỉnh thủ công neighbor nếu chưa đọc cảnh báo trong report.
-
-## 9. Stop Conditions
-
-Dừng nếu:
-
-- ACCEPT.
-- Đạt `MAX_ITERATIONS`.
-- Validator từ chối.
-- MANUAL_REVIEW hoặc REJECT.
-- Hai lần rerun liên tiếp không cải thiện RMSE khoảng 3-5% và cũng không cải thiện diagnostic như nugget/sill, range_hit_max, class accuracy, uncertainty hoặc transform diagnostics.
-- RMSE tốt hơn nhưng variogram xấu hơn rõ.
-- R²_pred vẫn âm sau nhiều iteration.
-- Không có candidate variogram/neighborhood hợp lệ.
-
-## 10. RAG Local
-
-Inventory, index và query tài liệu local:
-
-```powershell
-.\run_rag_inventory.ps1
-.\run_rag_build_local_index.ps1
-.\run_rag_query.ps1 -Query "variogram range spatial CV" -TopK 8
-```
-
-Không tải, chia sẻ hoặc commit tài liệu bản quyền. Chỉ dùng tài liệu local do người dùng cung cấp hợp pháp. Agent loop không gọi LLM, nhưng tạo `rag_context_iter_*.json` và `decision_packet_iter_*.md` để agent bên ngoài có run diagnostics, câu truy vấn RAG, evidence card summaries, whitelist và safety limits khi viết `ai_decision.json`.
-
-## 11. Không Được Làm
-
-- Không sửa input CSV/raster gốc.
-- Không đổi CRS nếu chưa được yêu cầu.
-- Không tắt cross-validation để kết quả đẹp hơn.
-- Không chọn run chỉ vì RMSE thấp nhất.
-- Không tạo uncertainty giả.
-- Không hard-code đường dẫn cá nhân.
-- Không commit runtime outputs như `output/`, `agent/responses/`, `agent/history/`, `knowledge/library/`.
+Chi tiết thực thi nằm trong `docs/EXECUTING_PROMPT.md`.

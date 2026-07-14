@@ -1,0 +1,18 @@
+{
+  "claim_id": "pca_full_rank_rotation_001",
+  "claim": "Keeping the same number of principal components as original covariates is a standardized orthogonal rotation, not dimensionality reduction; new samples must be projected with the scaler and loadings fitted during the sampling-design workflow.",
+  "applies_to": [
+    "pca_transformation",
+    "covariates",
+    "reproducibility"
+  ],
+  "evidence_sources": [
+    "jolliffe_cadima_2016_pca",
+    "fao_2022_gsnmap"
+  ],
+  "strength": "strong",
+  "conditions": "Applies to the current five-covariate to PC1-PC5 implementation.",
+  "limitations": "PCA is unsupervised and variance retention does not prove predictive relevance for any nutrient target.",
+  "recommended_action": "Freeze and version the center, scale, loading matrix, retained components and covariate order; compare PC-based models by nested spatial validation.",
+  "not_allowed_action": "Do not refit PCA on sample_actual or describe five retained PCs from five variables as dimension reduction."
+}

@@ -28,53 +28,165 @@ score_run <- function(r) {
   m <- r$metrics %||% list()
   vg <- r$variogram %||% list()
   cmp <- r$model_comparison %||% list()
+  cv <- r$cross_validation %||% list()
   warnings <- r$warnings %||% character(0)
+  hard_failures <- r$hard_failures %||% character(0)
   cls <- r$class_evaluation %||% list()
   unc <- r$uncertainty %||% list()
+  extrap <- r$extrapolation %||% list()
+  clipping <- r$clipping %||% list()
   rmse <- as_num(m$rk_rmse)
-  mae <- as_num(m$rk_mae)
   me <- as_num(m$rk_me)
   r2 <- as_num(m$rk_r2_pred)
   nrmse <- as_num(m$nrmse_mean)
   rpd <- as_num(m$rpd)
   nug_ratio <- as_num(vg$nugget_sill_ratio)
   range_hit <- isTRUE(vg$range_hit_max)
+  singular <- isTRUE(vg$singular)
+  pure_nugget <- identical(
+    r$prediction_method %||% "",
+    "regression_only_pure_nugget_fallback"
+  ) ||
+    identical(vg$model %||% "", "Nug") ||
+    (is.finite(nug_ratio) && nug_ratio >= 0.95)
   class_acc <- as_num(cls$class_accuracy)
   severe_class <- as_num(cls$severe_misclassification_rate)
-  unc_high <- as_num(unc$high_uncertainty_area_percent)
-  mean_sd <- as_num(unc$mean_sd)
   reg_rmse <- as_num(cmp$regression_rmse)
   ok_rmse <- as_num(cmp$ordinary_kriging_rmse)
   rk_rmse <- as_num(cmp$regression_kriging_rmse)
+  outside_aoa <- as_num(extrap$outside_aoa_percent)
+  clipped <- as_num(clipping$total_clipped_percent)
+  stable_reg <- as_num(cv$stability$rk_better_than_regression_fraction)
   score <- 50
   reasons <- character(0)
   penalties <- character(0)
-  if (is.finite(r2) && r2 > 0) { score <- score + 12; reasons <- c(reasons, "R2_pred is positive.") } else { score <- score - 20; penalties <- c(penalties, "R2_pred is not positive.") }
-  if (is.finite(me) && is.finite(rmse) && abs(me) <= 0.15 * max(rmse, 1e-9)) { score <- score + 8; reasons <- c(reasons, "Bias ME is small relative to RMSE.") } else { score <- score - 8; penalties <- c(penalties, "Bias ME is not small relative to RMSE.") }
-  if (is.finite(rk_rmse) && is.finite(reg_rmse) && rk_rmse < 0.97 * reg_rmse) { score <- score + 10; reasons <- c(reasons, "RK improves over regression-only.") } else if (is.finite(rk_rmse) && is.finite(reg_rmse)) { score <- score - 8; penalties <- c(penalties, "RK does not clearly improve over regression-only.") }
-  if (is.finite(rk_rmse) && is.finite(ok_rmse) && rk_rmse <= 1.03 * ok_rmse) { score <- score + 6; reasons <- c(reasons, "RK is competitive with ordinary kriging.") } else if (is.finite(rk_rmse) && is.finite(ok_rmse)) { score <- score - 8; penalties <- c(penalties, "RK is clearly worse than ordinary kriging.") }
-  if (is.finite(nug_ratio) && nug_ratio <= 0.50) { score <- score + 8; reasons <- c(reasons, "Nugget/Sill is good.") } else if (is.finite(nug_ratio) && nug_ratio <= 0.75) { score <- score + 2; reasons <- c(reasons, "Nugget/Sill is acceptable.") } else { score <- score - 12; penalties <- c(penalties, "Nugget/Sill is high.") }
-  if (!range_hit) { score <- score + 6; reasons <- c(reasons, "Range does not hit configured maximum.") } else { score <- score - 15; penalties <- c(penalties, "Range hits maximum limit.") }
-  if (is.finite(nrmse) && nrmse <= 0.25) score <- score + 5
-  if (is.finite(rpd) && rpd >= 1.4) score <- score + 5
-  if (isTRUE(cls$enabled) && is.finite(class_acc)) {
-    if (class_acc >= 0.70) { score <- score + 8; reasons <- c(reasons, "Class accuracy is good.") }
-    else if (class_acc >= 0.50) { score <- score + 2; reasons <- c(reasons, "Class accuracy is acceptable.") }
-    else { score <- score - 10; penalties <- c(penalties, "Class accuracy is low.") }
+
+  if (isTRUE(cv$strict_outer_cv)) {
+    score <- score + 12
+    reasons <- c(reasons, "Outer held-out spatial CV is available (not independent field validation).")
+  } else {
+    score <- score - 30
+    penalties <- c(penalties, "Outer held-out spatial CV is missing.")
   }
-  if (isTRUE(cls$enabled) && is.finite(severe_class) && severe_class > 0.10) {
+  if (length(hard_failures) > 0) {
+    score <- score - 35
+    penalties <- c(penalties,
+      paste0(length(hard_failures), " hard-failure condition(s) block acceptance."))
+  }
+  if (is.finite(r2) && r2 > 0) {
+    score <- score + 10
+    reasons <- c(reasons, "Outer R2_pred is positive.")
+  } else {
+    score <- score - 20
+    penalties <- c(penalties, "Outer R2_pred is not positive.")
+  }
+  if (is.finite(me) && is.finite(rmse) &&
+      abs(me) <= 0.15 * max(rmse, 1e-9)) {
+    score <- score + 8
+    reasons <- c(reasons, "Bias ME is small relative to RMSE.")
+  } else {
     score <- score - 8
-    penalties <- c(penalties, "Severe class misclassification is high.")
+    penalties <- c(penalties, "Bias ME is not small relative to RMSE.")
   }
-  if (isTRUE(unc$available) && is.finite(unc_high)) {
-    if (unc_high > 50) { score <- score - 10; penalties <- c(penalties, "High uncertainty covers more than half of evaluated cells.") }
-    else if (unc_high > 30) { score <- score - 6; penalties <- c(penalties, "High uncertainty covers a large area.") }
-    else { score <- score + 3; reasons <- c(reasons, "Uncertainty high-area share is acceptable.") }
+  if (is.finite(rk_rmse) && is.finite(reg_rmse) &&
+      rk_rmse < 0.97 * reg_rmse) {
+    score <- score + 8
+    reasons <- c(reasons, "RK improves over regression-only.")
+  } else if (is.finite(rk_rmse) && is.finite(reg_rmse)) {
+    score <- score - 6
+    penalties <- c(penalties,
+      "RK does not clearly improve over regression-only.")
+  }
+  if (is.finite(stable_reg)) {
+    if (stable_reg >= 0.80) {
+      score <- score + 8
+      reasons <- c(reasons, "RK improvement is stable across outer repeats.")
+    } else {
+      score <- score - 8
+      penalties <- c(penalties,
+        "RK improvement is not stable across outer repeats.")
+    }
+  }
+  if (is.finite(rk_rmse) && is.finite(ok_rmse) &&
+      rk_rmse <= 1.03 * ok_rmse) {
+    score <- score + 5
+  } else if (is.finite(rk_rmse) && is.finite(ok_rmse)) {
+    score <- score - 6
+    penalties <- c(penalties, "RK is clearly worse than ordinary kriging.")
+  }
+  if (pure_nugget) {
+    score <- score - 35
+    penalties <- c(
+      penalties,
+      "Residual variogram is pure nugget; final prediction is regression-only."
+    )
+  } else if (singular) {
+    score <- score - 30
+    penalties <- c(penalties, "Variogram fit is singular.")
+  } else if (is.finite(nug_ratio) && nug_ratio <= 0.50) {
+    score <- score + 7
+  } else if (is.finite(nug_ratio) && nug_ratio > 0.75) {
+    score <- score - 10
+    penalties <- c(penalties, "Nugget/Sill is high.")
+  }
+  if (range_hit) {
+    score <- score - 15
+    penalties <- c(penalties, "Range hits maximum limit.")
+  } else score <- score + 4
+  if (is.finite(nrmse) && nrmse <= 0.25) score <- score + 4
+  if (is.finite(rpd) && rpd >= 1.4) score <- score + 4
+
+  if (isTRUE(cls$enabled) && isTRUE(cls$approved) && is.finite(class_acc)) {
+    if (class_acc >= 0.70) score <- score + 7
+    else if (class_acc < 0.50) {
+      score <- score - 10
+      penalties <- c(penalties, "Approved class accuracy is low.")
+    }
+    if (is.finite(severe_class) && severe_class > 0.10) {
+      score <- score - 8
+      penalties <- c(penalties, "Severe class misclassification is high.")
+    }
+  }
+  if (isTRUE(unc$calibrated) && isTRUE(unc$used_in_grade)) {
+    coverage <- as_num(unc$coverage_95)
+    if (is.finite(coverage) && coverage >= 0.90 && coverage <= 0.98) {
+      score <- score + 4
+      reasons <- c(reasons, "Total predictive intervals are calibrated.")
+    } else {
+      score <- score - 6
+      penalties <- c(penalties, "Predictive interval calibration is poor.")
+    }
+  }
+  if (is.finite(outside_aoa)) {
+    if (outside_aoa > 40) {
+      score <- score - 15
+      penalties <- c(penalties, "Large area lies outside AOA.")
+    } else if (outside_aoa > 20) {
+      score <- score - 7
+      penalties <- c(penalties, "AOA extrapolation area is notable.")
+    }
+  }
+  if (is.finite(clipped)) {
+    if (clipped > 20) {
+      score <- score - 15
+      penalties <- c(penalties, "Clipping affects a large map area.")
+    } else if (clipped > 5) {
+      score <- score - 5
+      penalties <- c(penalties, "Clipping is non-negligible.")
+    }
   }
   warning_count <- length(warnings)
-  score <- score - min(20, warning_count * 2)
-  if (warning_count > 0) penalties <- c(penalties, paste0(warning_count, " warning(s) were reported."))
-  list(score = max(0, min(100, score)), reasons = reasons, penalties = penalties, rmse = rmse)
+  score <- score - min(16, warning_count * 2)
+  if (warning_count > 0) {
+    penalties <- c(penalties,
+      paste0(warning_count, " warning(s) were reported."))
+  }
+  list(
+    score = max(0, min(100, score)), reasons = reasons,
+    penalties = penalties, rmse = rmse,
+    blocked = length(hard_failures) > 0 || !isTRUE(cv$strict_outer_cv) ||
+      pure_nugget || singular || range_hit || !is.finite(r2) || r2 <= 0
+  )
 }
 
 args <- agent_parse_args(commandArgs(trailingOnly = TRUE))
@@ -121,7 +233,7 @@ if (!is.null(lowest) && !identical(lowest$run_id, selected$run_id)) {
   why_not_lowest <- paste0("Lowest RMSE run ", lowest$run_id, " scored lower scientifically because: ", paste(low_score$penalties, collapse = " "))
 }
 
-human_review <- scores[best_idx] < 65 || any(grepl("R2_pred is not positive|Range hits maximum|Nugget/Sill is high", scored[[best_idx]]$penalties))
+human_review <- scores[best_idx] < 65 || isTRUE(scored[[best_idx]]$blocked)
 decision <- if (human_review) "MANUAL_REVIEW" else "FINAL_ACCEPT"
 reason <- paste0("Selected ", selected$run_id, " with scientific score ", round(scores[best_idx], 1), "/100. ", paste(c(scored[[best_idx]]$reasons, scored[[best_idx]]$penalties), collapse = " "))
 
@@ -142,8 +254,13 @@ summary <- data.frame(
   range_hit_max = vapply(completed, function(r) isTRUE(r$variogram$range_hit_max), logical(1)),
   class_accuracy = vapply(completed, function(r) as_num(r$class_evaluation$class_accuracy), numeric(1)),
   severe_misclassification_rate = vapply(completed, function(r) as_num(r$class_evaluation$severe_misclassification_rate), numeric(1)),
-  high_uncertainty_area_percent = vapply(completed, function(r) as_num(r$uncertainty$high_uncertainty_area_percent), numeric(1)),
-  mean_prediction_sd = vapply(completed, function(r) as_num(r$uncertainty$mean_sd), numeric(1)),
+  strict_outer_cv = vapply(completed, function(r) isTRUE(r$cross_validation$strict_outer_cv), logical(1)),
+  outer_repeats = vapply(completed, function(r) as_num(r$cross_validation$outer_repeats), numeric(1)),
+  variogram_singular = vapply(completed, function(r) isTRUE(r$variogram$singular), logical(1)),
+  outside_aoa_percent = vapply(completed, function(r) as_num(r$extrapolation$outside_aoa_percent), numeric(1)),
+  clipped_area_percent = vapply(completed, function(r) as_num(r$clipping$total_clipped_percent), numeric(1)),
+  uncertainty_calibrated = vapply(completed, function(r) isTRUE(r$uncertainty$calibrated), logical(1)),
+  n_hard_failures = vapply(completed, function(r) length(r$hard_failures %||% character(0)), integer(1)),
   n_warnings = vapply(completed, function(r) length(r$warnings %||% character(0)), integer(1)),
   source_file = vapply(completed, function(r) r$.source_file, character(1)),
   stringsAsFactors = FALSE

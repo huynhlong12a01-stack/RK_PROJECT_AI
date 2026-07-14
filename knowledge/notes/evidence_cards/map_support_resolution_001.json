@@ -1,0 +1,20 @@
+{
+  "claim_id": "map_support_resolution_001",
+  "claim": "Point sample support, laboratory composite support, covariate support and raster cell support are different; prediction resolution should be interpreted as the support of the modeled product, not the precision of a soil measurement.",
+  "applies_to": [
+    "scale_and_support",
+    "field_sampling",
+    "map_production",
+    "cartographic_qa"
+  ],
+  "evidence_sources": [
+    "globalsoilmap_2015_specs",
+    "fao_2022_gsnmap",
+    "usda_2017_soil_survey_manual"
+  ],
+  "strength": "strong",
+  "conditions": "The project treats each laboratory result as one average 0-30 cm sample value and predicts on a raster grid.",
+  "limitations": "Within-cell and within-composite variation is not resolved by the model and can be substantial.",
+  "recommended_action": "State depth convention, composite protocol, grid size, native covariate resolutions and intended map scale in the report.",
+  "not_allowed_action": "Do not interpret sub-pixel variation or extra decimal precision as observed soil detail."
+}

@@ -1,0 +1,19 @@
+{
+  "claim_id": "nutrient_map_not_fertilizer_rate_001",
+  "claim": "A map of measured or predicted nutrient status is not by itself a fertilizer-rate recommendation map; prescriptions require crop- and region-specific calibration, analytical method compatibility, yield-response evidence and agronomic rules.",
+  "applies_to": [
+    "soil_nutrients",
+    "nutrient_management",
+    "map_production",
+    "reporting"
+  ],
+  "evidence_sources": [
+    "fao_2022_gsnmap",
+    "fao_2006_plant_nutrition_food_security"
+  ],
+  "strength": "strong",
+  "conditions": "Applies when converting continuous nutrient predictions into low-medium-high classes or fertilizer decisions for sugarcane.",
+  "limitations": "Thresholds can change with crop, soil, region, extractant, unit, economic objective and management system.",
+  "recommended_action": "Publish concentration/status maps first; add recommendation classes only after a documented local agronomic guideline and expert review are linked to each target.",
+  "not_allowed_action": "Do not infer a universal fertilizer rate directly from model predictions or a generic global threshold table."
+}

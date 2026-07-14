@@ -1,0 +1,33 @@
+project_id: AKS_2026
+crs_epsg: 32649
+resolution_m: 10
+gee_project_id: rkapp-492504
+start_date: "2026-01-01"
+end_date: "2026-04-01"
+
+continuous_covariates: [CHIRPS, DEM, NDVI, Slope, TWI]
+soil_group_field: Ma1
+
+sampling_method: backend_reported_at_runtime
+method_family: conditioned_latin_hypercube_core_with_spatial_augmentation
+original_clhs_optimizer: false
+clhs_backend: auto
+clhs_auto_install: true
+clhs_repository: https://cloud.r-project.org
+clhs_iterations: 20000
+clhs_restarts: 4
+clhs_use_cpp: true
+clhs_max_candidates: 200000
+clhs_weight_numeric: 1.0
+clhs_weight_factor: 1.0
+clhs_weight_correlation: 1.0
+reduced_core_samples: 79
+reduced_plan: conditioned_lhs_core_only
+inner_buffer_m: 30
+minimum_field_area_ha: 0.1
+minimum_spacing_m: 100
+spatial_infill_max_fraction: 0.20
+short_lag_fraction: 0.10
+short_lag_min_m: 100
+short_lag_max_m: 300
+random_seed: 42

@@ -43,8 +43,12 @@ output_json <- args$output %||% file.path("agent", "responses", paste0("raster_s
 output_csv <- sub("\\.json$", ".csv", output_json)
 
 warnings <- character(0)
+hard_failures <- character(0)
 if (!dir.exists(raster_dir)) {
-  warnings <- c(warnings, paste0("Raster directory not found: ", raster_dir))
+  hard_failures <- c(
+    hard_failures,
+    paste0("Không tìm thấy thư mục raster: ", raster_dir)
+  )
   files <- character(0)
 } else {
   files <- list.files(raster_dir, pattern = pattern, full.names = TRUE, ignore.case = TRUE)
@@ -61,7 +65,10 @@ for (i in seq_along(files)) {
       res_x = NA_real_, res_y = NA_real_, n_cells = NA_real_, non_na_cells = NA_real_,
       status = "read_failed", stringsAsFactors = FALSE
     )
-    warnings <- c(warnings, paste0("Cannot read raster: ", f))
+    hard_failures <- c(
+      hard_failures,
+      paste0("Không đọc được raster: ", f)
+    )
     next
   }
   r <- r_try[[1]]
@@ -84,20 +91,47 @@ for (i in seq_along(files)) {
 }
 
 schema_table <- if (length(rows) > 0) do.call(rbind, rows) else data.frame()
-if (nrow(schema_table) == 0) warnings <- c(warnings, paste0("No raster matched pattern ", pattern, " in ", raster_dir))
+if (nrow(schema_table) == 0) {
+  hard_failures <- c(
+    hard_failures,
+    paste0(
+      "Không có raster khớp pattern ", pattern, " trong ", raster_dir)
+  )
+}
 if (nrow(schema_table) > 0) {
-  if (any(is.na(schema_table$crs) | !nzchar(schema_table$crs))) warnings <- c(warnings, "One or more rasters have no CRS.")
+  if (any(is.na(schema_table$crs) | !nzchar(schema_table$crs))) {
+    hard_failures <- c(
+      hard_failures, "Một hoặc nhiều raster không có CRS.")
+  }
   ok_rows <- schema_table$status == "ok"
   if (sum(ok_rows) > 1) {
     crs_unique <- unique(schema_table$crs[ok_rows])
     crs_unique <- crs_unique[!is.na(crs_unique) & nzchar(crs_unique)]
-    if (length(crs_unique) > 1) warnings <- c(warnings, "Raster CRS is not consistent across covariates.")
+    if (length(crs_unique) > 1) {
+      hard_failures <- c(
+        hard_failures, "CRS không nhất quán giữa các raster covariate.")
+    }
     res_key <- paste(round(schema_table$res_x[ok_rows], 8), round(schema_table$res_y[ok_rows], 8), sep = "x")
-    if (length(unique(res_key)) > 1) warnings <- c(warnings, "Raster resolution is not consistent across covariates.")
+    if (length(unique(res_key)) > 1) {
+      warnings <- c(
+        warnings,
+        "Độ phân giải không nhất quán giữa các raster; engine sẽ resample.")
+    }
     ext_key <- paste(round(schema_table$xmin[ok_rows], 4), round(schema_table$xmax[ok_rows], 4), round(schema_table$ymin[ok_rows], 4), round(schema_table$ymax[ok_rows], 4), sep = ";")
-    if (length(unique(ext_key)) > 1) warnings <- c(warnings, "Raster extent is not identical across covariates. The engine will resample/project, but check alignment carefully.")
+    if (length(unique(ext_key)) > 1) {
+      warnings <- c(
+        warnings,
+        paste0(
+          "Extent không giống nhau giữa các raster. Engine sẽ project/resample; ",
+          "cần kiểm tra alignment cẩn thận."
+        )
+      )
+    }
   }
-  if (any(schema_table$non_na_cells <= 0, na.rm = TRUE)) warnings <- c(warnings, "One or more rasters have no valid cells.")
+  if (any(schema_table$non_na_cells <= 0, na.rm = TRUE)) {
+    hard_failures <- c(
+      hard_failures, "Một hoặc nhiều raster không có cell hợp lệ.")
+  }
 }
 
 point_overlap <- list(checked = FALSE, point_file = agent_norm_path(point_file), n_points = NULL, n_points_with_first_raster_value = NULL, first_raster = NULL)
@@ -122,18 +156,35 @@ if (length(files) > 0 && file.exists(point_file)) {
           if (!inherits(ex, "try-error")) {
             point_overlap$n_points_with_first_raster_value <- sum(!is.na(ex))
             point_overlap$first_raster <- agent_norm_path(files[[1]])
-            if (point_overlap$n_points_with_first_raster_value == 0) warnings <- c(warnings, "No sample point overlaps the first raster's valid cells. Check CRS, extent, or input coordinates.")
+            if (point_overlap$n_points_with_first_raster_value == 0) {
+              hard_failures <- c(
+                hard_failures,
+                paste0(
+                  "Không có điểm mẫu nào overlap cell hợp lệ của raster đầu tiên; ",
+                  "cần kiểm tra CRS, extent và tọa độ input."
+                )
+              )
+            }
           }
         }
       }
     } else {
-      warnings <- c(warnings, "Point file exists but lon/lat columns are missing; raster-point overlap was skipped.")
+      hard_failures <- c(
+        hard_failures,
+        "File điểm thiếu cột lon/lat; không thể kiểm tra overlap raster-điểm."
+      )
     }
   } else {
-    warnings <- c(warnings, "Point file could not be read; raster-point overlap was skipped.")
+    hard_failures <- c(
+      hard_failures,
+      "Không đọc được file điểm; không thể kiểm tra overlap raster-điểm."
+    )
   }
 } else if (!file.exists(point_file)) {
-  warnings <- c(warnings, paste0("Point file not found for raster overlap check: ", point_file))
+  hard_failures <- c(
+    hard_failures,
+    paste0("Không tìm thấy file điểm để kiểm tra overlap raster: ", point_file)
+  )
 }
 
 agent_ensure_dir(dirname(output_json))
@@ -145,11 +196,24 @@ result <- list(
   raster_table_csv = agent_norm_path(output_csv),
   rasters = schema_table,
   point_overlap = point_overlap,
+  messages = character(0),
   warnings = unique(warnings),
-  valid = length(files) > 0 && nrow(schema_table) > 0 && all(schema_table$status == "ok") && !any(grepl("no CRS|not consistent|no valid cells|No sample point overlaps", warnings, ignore.case = TRUE))
+  hard_failures = unique(hard_failures),
+  valid = length(files) > 0 &&
+    nrow(schema_table) > 0 &&
+    all(schema_table$status == "ok") &&
+    length(hard_failures) == 0
 )
 agent_write_json(result, output_json)
 
 cat("[INFO] Raster schema JSON: ", agent_norm_path(output_json), "\n", sep = "")
 cat("[INFO] Raster schema CSV: ", agent_norm_path(output_csv), "\n", sep = "")
-if (length(warnings) > 0) cat("[WARN] ", paste(unique(warnings), collapse = "\n[WARN] "), "\n", sep = "")
+if (length(warnings) > 0) {
+  cat("[WARN] ", paste(unique(warnings), collapse = "\n[WARN] "),
+    "\n", sep = "")
+}
+if (length(hard_failures) > 0) {
+  cat("[HARD-FAIL] ",
+    paste(unique(hard_failures), collapse = "\n[HARD-FAIL] "),
+    "\n", sep = "")
+}

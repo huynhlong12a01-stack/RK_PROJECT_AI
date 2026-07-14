@@ -81,8 +81,8 @@ ok("validated LOG_BACKTRANSFORM_BIAS_CORRECTION parameter")
 # 7. Test compare two fake run_result.json files.
 fake_dir <- file.path(bad_dir, "fake_results")
 agent_ensure_dir(fake_dir)
-fake_low_rmse_bad <- list(run_id = "fake_low_rmse_bad", target_field = "pH", status = "completed", quality = list(final_grade = "B", final_score = 75), metrics = list(rk_rmse = 0.30, rk_mae = 0.20, rk_me = 0.15, rk_r2_pred = -0.10, nrmse_mean = 0.05, rpd = 1.7), model_comparison = list(regression_rmse = 0.31, ordinary_kriging_rmse = 0.29, regression_kriging_rmse = 0.30), variogram = list(nugget_sill_ratio = 0.90, range = 8000, range_hit_max = TRUE), warnings = c("Range hits maximum", "R2 negative"), files = list())
-fake_good <- list(run_id = "fake_good", target_field = "pH", status = "completed", quality = list(final_grade = "B", final_score = 74), metrics = list(rk_rmse = 0.32, rk_mae = 0.21, rk_me = 0.01, rk_r2_pred = 0.25, nrmse_mean = 0.06, rpd = 1.6), model_comparison = list(regression_rmse = 0.40, ordinary_kriging_rmse = 0.33, regression_kriging_rmse = 0.32), variogram = list(nugget_sill_ratio = 0.20, range = 3500, range_hit_max = FALSE), warnings = character(0), files = list())
+fake_low_rmse_bad <- list(run_id = "fake_low_rmse_bad", target_field = "pH", status = "completed", quality = list(final_grade = "B", final_score = 75), metrics = list(rk_rmse = 0.30, rk_mae = 0.20, rk_me = 0.15, rk_r2_pred = -0.10, nrmse_mean = 0.05, rpd = 1.7), model_comparison = list(regression_rmse = 0.31, ordinary_kriging_rmse = 0.29, regression_kriging_rmse = 0.30), variogram = list(nugget_sill_ratio = 0.90, range = 8000, range_hit_max = TRUE, singular = FALSE), cross_validation = list(strict_outer_cv = TRUE, outer_repeats = 5, stability = list(rk_better_than_regression_fraction = 0.2)), hard_failures = c("Range hits maximum"), warnings = c("Range hits maximum", "R2 negative"), files = list())
+fake_good <- list(run_id = "fake_good", target_field = "pH", status = "completed", quality = list(final_grade = "B", final_score = 74), metrics = list(rk_rmse = 0.32, rk_mae = 0.21, rk_me = 0.01, rk_r2_pred = 0.25, nrmse_mean = 0.06, rpd = 1.6), model_comparison = list(regression_rmse = 0.40, ordinary_kriging_rmse = 0.33, regression_kriging_rmse = 0.32), variogram = list(nugget_sill_ratio = 0.20, range = 3500, range_hit_max = FALSE, singular = FALSE), cross_validation = list(strict_outer_cv = TRUE, outer_repeats = 5, stability = list(rk_better_than_regression_fraction = 0.9)), hard_failures = character(0), warnings = character(0), files = list())
 agent_write_json(fake_low_rmse_bad, file.path(fake_dir, "fake_low_rmse_bad_run_result.json"))
 agent_write_json(fake_good, file.path(fake_dir, "fake_good_run_result.json"))
 compare_out <- file.path(bad_dir, "fake_compare.json")
@@ -92,7 +92,23 @@ comparison <- agent_read_json(compare_out)
 if (!identical(comparison$selected_run_id, "fake_good")) fail("compare runs selected lowest RMSE despite bad diagnostics")
 ok("compared fake runs without choosing lowest RMSE blindly")
 
-# 8. Test compare penalizes poor class accuracy and high uncertainty.
+pure_nugget_result <- fake_good
+pure_nugget_result$prediction_method <-
+  "regression_only_pure_nugget_fallback"
+pure_nugget_result$variogram$model <- "Nug"
+pure_nugget_result$variogram$nugget_sill_ratio <- 1
+pure_nugget_result$hard_failures <-
+  "Residual variogram is pure nugget."
+pure_nugget_result$uncertainty <- list(
+  available = FALSE, calibrated = FALSE, used_in_grade = FALSE)
+if (!identical(
+    agent_decision_hint(pure_nugget_result),
+    "MANUAL_REVIEW_REQUIRED")) {
+  fail("pure-nugget regression fallback was not blocked from ACCEPT")
+}
+ok("blocked pure-nugget regression fallback from ACCEPT")
+
+# 8. Test compare uses only approved class accuracy; residual q80 uncertainty is informational.
 fake_class_dir <- file.path(bad_dir, "fake_class_uncertainty_results")
 agent_ensure_dir(fake_class_dir)
 fake_low_rmse_class_bad <- list(
@@ -100,9 +116,11 @@ fake_low_rmse_class_bad <- list(
   quality = list(final_grade = "B", final_score = 78),
   metrics = list(rk_rmse = 0.25, rk_mae = 0.18, rk_me = 0.00, rk_r2_pred = 0.40, nrmse_mean = 0.08, rpd = 1.8),
   model_comparison = list(regression_rmse = 0.40, ordinary_kriging_rmse = 0.28, regression_kriging_rmse = 0.25),
-  variogram = list(nugget_sill_ratio = 0.20, range = 3500, range_hit_max = FALSE),
-  class_evaluation = list(enabled = TRUE, class_accuracy = 0.35, within_one_class_rate = 0.65, severe_misclassification_rate = 0.25),
-  uncertainty = list(available = TRUE, mean_sd = 0.12, high_uncertainty_area_percent = 65),
+  variogram = list(nugget_sill_ratio = 0.20, range = 3500, range_hit_max = FALSE, singular = FALSE),
+  cross_validation = list(strict_outer_cv = TRUE, outer_repeats = 5, stability = list(rk_better_than_regression_fraction = 0.9)),
+  hard_failures = character(0),
+  class_evaluation = list(enabled = TRUE, approved = TRUE, class_accuracy = 0.35, within_one_class_rate = 0.65, severe_misclassification_rate = 0.25),
+  uncertainty = list(available = TRUE, calibrated = FALSE, used_in_grade = FALSE, mean_sd = 0.12, high_uncertainty_area_percent = 65),
   warnings = c("Class accuracy is low", "High uncertainty area is large"), files = list()
 )
 fake_higher_rmse_class_good <- list(
@@ -110,9 +128,11 @@ fake_higher_rmse_class_good <- list(
   quality = list(final_grade = "B", final_score = 76),
   metrics = list(rk_rmse = 0.29, rk_mae = 0.19, rk_me = 0.01, rk_r2_pred = 0.35, nrmse_mean = 0.09, rpd = 1.7),
   model_comparison = list(regression_rmse = 0.40, ordinary_kriging_rmse = 0.30, regression_kriging_rmse = 0.29),
-  variogram = list(nugget_sill_ratio = 0.22, range = 3400, range_hit_max = FALSE),
-  class_evaluation = list(enabled = TRUE, class_accuracy = 0.78, within_one_class_rate = 0.93, severe_misclassification_rate = 0.02),
-  uncertainty = list(available = TRUE, mean_sd = 0.10, high_uncertainty_area_percent = 10),
+  variogram = list(nugget_sill_ratio = 0.22, range = 3400, range_hit_max = FALSE, singular = FALSE),
+  cross_validation = list(strict_outer_cv = TRUE, outer_repeats = 5, stability = list(rk_better_than_regression_fraction = 0.9)),
+  hard_failures = character(0),
+  class_evaluation = list(enabled = TRUE, approved = TRUE, class_accuracy = 0.78, within_one_class_rate = 0.93, severe_misclassification_rate = 0.02),
+  uncertainty = list(available = TRUE, calibrated = FALSE, used_in_grade = FALSE, mean_sd = 0.10, high_uncertainty_area_percent = 10),
   warnings = character(0), files = list()
 )
 agent_write_json(fake_low_rmse_class_bad, file.path(fake_class_dir, "fake_low_rmse_class_bad_run_result.json"))
@@ -122,13 +142,17 @@ status <- system2(Sys.which("Rscript"), c("scripts/agent_compare_runs.R", "--res
 if (!file.exists(class_compare_out)) fail("compare runs did not produce class/uncertainty output")
 class_comparison <- agent_read_json(class_compare_out)
 if (!identical(class_comparison$selected_run_id, "fake_higher_rmse_class_good")) fail("compare runs ignored class accuracy/uncertainty penalties")
-ok("compared fake runs with class accuracy and uncertainty penalties")
+ok("compared fake runs with approved class accuracy and informational residual uncertainty")
 # 9. Test README command examples are syntactically plausible.
 if (!file.exists("README.md") || !file.exists("AGENT_README.md")) fail("README files are missing")
 readme <- paste(readLines("README.md", warn = FALSE), collapse = "\n")
 agent_readme <- paste(readLines("AGENT_README.md", warn = FALSE), collapse = "\n")
-if (!grepl("run_rk.bat", readme, fixed = TRUE) || !grepl("run_agent.ps1", readme, fixed = TRUE)) fail("README command examples are missing")
-if (!grepl("agent_validate_decision.R", agent_readme, fixed = TRUE) || !grepl("agent_compare_runs.R", agent_readme, fixed = TRUE)) fail("AGENT_README command examples are missing")
+if (!grepl("CREATE_NEW_PROJECT.bat", readme, fixed = TRUE) ||
+    !grepl("projects/TEN_DU_AN/README.md", readme, fixed = TRUE)) {
+  fail("README project-workflow examples are missing")
+}
+if (!grepl("projects/TEN_DU_AN/RUN.ps1 design", agent_readme, fixed = TRUE) ||
+    !grepl("projects/TEN_DU_AN/RUN.ps1 status", agent_readme, fixed = TRUE)) fail("AGENT_README command examples are missing")
 ok("README command examples are present")
 
 cat("[OK] Agent smoke test completed.\n")

@@ -35,7 +35,9 @@ make_failed_result <- function(run_id, target_field, output_folder, status, mess
     target_transform = list(requested = NULL, used = NULL, profile = NULL, reason = NULL),
     model_comparison = list(regression_rmse = NULL, ordinary_kriging_rmse = NULL, regression_kriging_rmse = NULL),
     variogram = list(model = NULL, nugget = NULL, psill = NULL, sill = NULL, range = NULL, practical_range = NULL, nugget_sill_ratio = NULL, range_hit_max = NULL),
+    messages = character(0),
     warnings = c(message),
+    hard_failures = c(message),
     recommendations = c("Fix the request or inspect the run log before rerunning."),
     files = list(run_log = agent_norm_path(log_file)),
     missing_outputs = c("RK engine did not complete successfully.")
@@ -122,6 +124,10 @@ cv_results <- file.path(report_dir, "tables", paste0("cv_results_", target_name,
 neighbor_tuning_csv <- file.path(report_dir, "tables", paste0("neighbor_tuning_", target_name, ".csv"))
 rk_report_csv <- file.path(report_dir, "tables", paste0("rk_report_", target_name, ".csv"))
 engine_log <- file.path(report_dir, "logs", paste0("run_log_", target_name, ".txt"))
+uncertainty_raster <- file.path(
+  output_folder, "05_final_rk",
+  paste0("RK_uncertainty_STD_", target_name, "_utm.tif")
+)
 
 missing <- character(0)
 for (p in c(eval_json, model_csv, cv_results, html_report, interactive_variogram, engine_log)) {
@@ -151,21 +157,44 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
   if (!file.exists(variogram_diag)) optional_missing <- c(optional_missing, paste0(agent_norm_path(variogram_diag), " not available"))
   if (!file.exists(variogram_candidate_csv)) optional_missing <- c(optional_missing, paste0(agent_norm_path(variogram_candidate_csv), " not available; no valid constrained variogram candidates may have been found"))
   if (!file.exists(neighbor_tuning_csv)) optional_missing <- c(optional_missing, paste0(agent_norm_path(neighbor_tuning_csv), " not available; AUTO_NEIGHBORS may be disabled or no neighbor candidate table was produced"))
+  if (isTRUE(unc$available) && !file.exists(uncertainty_raster)) {
+    optional_missing <- c(
+      optional_missing,
+      paste0(agent_norm_path(uncertainty_raster), " not available")
+    )
+  }
+  if (!isTRUE(unc$available)) {
+    optional_missing <- c(
+      optional_missing,
+      "residual uncertainty raster not available; see uncertainty metadata"
+    )
+  }
 
   result <- list(
     run_id = run_id,
     requested_run_id = requested_run_id,
     target_field = target_field,
+    prediction_method =
+      evaluation$prediction_method %||% "regression_kriging",
     status = "completed",
     output_folder = agent_norm_path(output_folder),
-    quality = list(final_grade = q$final_grade %||% NULL, final_score = q$final_score %||% NULL, decision_hint = NULL),
+    quality = list(
+      final_grade = q$final_grade %||% NULL,
+      final_score = q$final_score %||% NULL,
+      grade_label = q$grade_label %||% NULL,
+      publication_grade = q$publication_grade %||% FALSE,
+      decision_hint = NULL
+    ),
     metrics = list(
       rk_rmse = cv$RMSE %||% NULL,
       rk_mae = cv$MAE %||% NULL,
       rk_me = cv$ME %||% NULL,
       rk_r2_pred = cv$R2_pred %||% NULL,
       nrmse_mean = cv$NRMSE_mean %||% NULL,
-      rpd = cv$RPD %||% NULL
+      rpd = cv$RPD %||% NULL,
+      n_interval = cv$n_interval %||% NULL,
+      interval_fraction = cv$interval_fraction %||% NULL,
+      coverage_95 = cv$coverage_95 %||% NULL
     ),
     target_transform = evaluation$target_transform %||% list(),
     model_comparison = list(
@@ -177,7 +206,14 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
       method = cv_info$method %||% NULL,
       cv_folds = cv_info$cv_folds %||% NULL,
       refit_variogram = cv_info$refit_variogram %||% NULL,
-      leakage_guard = cv_info$leakage_guard %||% NULL
+      leakage_guard = cv_info$leakage_guard %||% NULL,
+      strict_outer_cv = cv_info$strict_outer_cv %||% FALSE,
+      outer_method = cv_info$outer_method %||% NULL,
+      outer_folds = cv_info$outer_folds %||% NULL,
+      outer_repeats = cv_info$outer_repeats %||% NULL,
+      inner_method = cv_info$inner_method %||% NULL,
+      inner_folds = cv_info$inner_folds %||% NULL,
+      stability = cv_info$stability %||% list()
     ),
     class_evaluation = list(
       enabled = cls$enabled %||% FALSE,
@@ -190,7 +226,16 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
       mean_sd = unc$mean_sd %||% NULL,
       max_sd = unc$max_sd %||% NULL,
       high_uncertainty_area_percent = unc$high_uncertainty_area_percent %||% NULL,
-      note = "Residual kriging STD only; regression and covariate uncertainty are not included."
+      high_uncertainty_threshold = unc$high_uncertainty_threshold %||% NULL,
+      threshold_source = unc$threshold_source %||% NULL,
+      n_interval = unc$n_interval %||% NULL,
+      interval_fraction = unc$interval_fraction %||% NULL,
+      coverage_95 = unc$coverage_95 %||% NULL,
+      mean_standardized_error = unc$mean_standardized_error %||% NULL,
+      variance_standardized_RMSE = unc$variance_standardized_RMSE %||% NULL,
+      calibrated = unc$calibrated %||% FALSE,
+      used_in_grade = unc$used_in_grade %||% FALSE,
+      note = "Residual kriging STD only; not total predictive uncertainty."
     ),
     kriging = list(
       auto_neighbors_enabled = if (nrow(rk_report) > 0 && "auto_neighbors_enabled" %in% names(rk_report)) rk_report$auto_neighbors_enabled[1] else NULL,
@@ -206,9 +251,16 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
       range = vg$range %||% NULL,
       practical_range = vg$practical_range %||% NULL,
       nugget_sill_ratio = vg$nugget_sill_ratio %||% NULL,
-      range_hit_max = range_hit_max
+      range_hit_max = vg$range_hit_max %||% range_hit_max,
+      singular = vg$singular %||% FALSE,
+      anisotropy_ratio = vg$anisotropy_ratio %||% NULL,
+      anisotropy_major_direction = vg$anisotropy_major_direction %||% NULL
     ),
+    extrapolation = evaluation$extrapolation %||% list(),
+    clipping = evaluation$clipping %||% list(),
+    messages = evaluation$messages %||% character(0),
     warnings = evaluation$warnings %||% character(0),
+    hard_failures = evaluation$hard_failures %||% character(0),
     recommendations = evaluation$recommendations %||% character(0),
     files = list(
       html_report = agent_norm_path(html_report),
@@ -221,7 +273,18 @@ if (!identical(status, 0L) || !file.exists(eval_json)) {
       variogram_diagnostics_json = agent_norm_path(variogram_diag),
       interactive_variogram = agent_norm_path(interactive_variogram),
       run_log = agent_norm_path(engine_log),
-      agent_log = agent_norm_path(log_file)
+      agent_log = agent_norm_path(log_file),
+      rk_unclamped = agent_norm_path(rk_unclamped),
+      rk_clipping_mask = agent_norm_path(rk_clipping_mask),
+      uncertainty_map = if (file.exists(uncertainty_raster)) {
+        agent_norm_path(uncertainty_raster)
+      } else {
+        NULL
+      },
+      area_of_applicability = agent_norm_path(aoa_raster),
+      nested_cv_repeat_metrics = agent_norm_path(nested_repeat_csv),
+      nested_cv_stability = agent_norm_path(nested_stability_csv),
+      nested_cv_inner_tuning = agent_norm_path(nested_tuning_csv)
     ),
     missing_outputs = if (length(c(missing, optional_missing)) == 0) list() else unique(c(missing, optional_missing))
   )

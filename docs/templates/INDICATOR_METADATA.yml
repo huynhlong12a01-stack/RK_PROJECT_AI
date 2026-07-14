@@ -1,0 +1,201 @@
+# DINH NGHIA CHI TIEU PHAN TICH
+# ------------------------------------------------------------
+# File nay KHONG chua ket qua lab. Ket qua van chi duoc dan vao
+# sample_actual.csv. Moi dong mau duoc hieu la mot ket qua trung binh
+# dai dien cho mau 0-30 cm; ung dung khong tach tang dat.
+#
+# Truoc khi noi suy mot chi tieu:
+# 1) doi chieu phieu tra ket qua cua phong thi nghiem;
+# 2) dien laboratory_method, extraction_ratio (neu co), unit;
+# 3) chon dung profile_name;
+# 4) doi confirmed thanh true.
+#
+# classification.approved phai giu false neu chua co bo nguong duoc phe
+# duyet cho dung cay trong, vung, phuong phap lab va muc dich su dung.
+# Ung dung chi tao ban do ham luong; khong tao khuyen cao lieu phan bon.
+
+schema_version: 1
+
+sample_support:
+  interpretation: average_result_per_sample
+  nominal_depth_cm: "0-30"
+  split_by_depth: false
+
+product_policy:
+  nutrient_content_maps_only: true
+  fertilizer_recommendation_enabled: false
+
+targets:
+  pH:
+    confirmed: false
+    profile_name:
+    unit: "pH unit"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: &classification_not_approved
+      approved: false
+      source:
+      version:
+      approved_by:
+
+  Humus:
+    confirmed: false
+    profile_name: OM_pct
+    unit: "%"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  CEC:
+    confirmed: false
+    profile_name: CEC
+    unit: "cmol(+)/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  N_total:
+    confirmed: false
+    profile_name: N_total
+    unit: "%"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  P_Olsen:
+    confirmed: false
+    profile_name: P_Olsen_mgkg
+    unit: "mg/kg"
+    laboratory_method: Olsen
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  P_Bray:
+    confirmed: false
+    profile_name: P_Bray1_mgkg
+    unit: "mg/kg"
+    laboratory_method: Bray-1
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  K_available_mgkg:
+    confirmed: false
+    profile_name: K_available_mgkg
+    unit: "mg/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  K_exchangeable_cmol:
+    confirmed: false
+    profile_name: K_exchangeable_cmolkg
+    unit: "cmol(+)/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  Ca_exchangeable:
+    confirmed: false
+    profile_name: Ca_exchangeable
+    unit: "cmol(+)/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  Mg_exchangeable:
+    confirmed: false
+    profile_name: Mg_exchangeable
+    unit: "cmol(+)/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  S_available:
+    confirmed: false
+    profile_name: S_available
+    unit: "mg/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  B_available:
+    confirmed: false
+    profile_name: B_available
+    unit: "mg/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  Zn_available:
+    confirmed: false
+    profile_name: Zn_available
+    unit: "mg/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  Cu_available:
+    confirmed: false
+    profile_name: Cu_available
+    unit: "mg/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  Mn_available:
+    confirmed: false
+    profile_name: Mn_available
+    unit: "mg/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  Fe_available:
+    confirmed: false
+    profile_name: Fe_available
+    unit: "mg/kg"
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved
+
+  EC:
+    confirmed: false
+    profile_name:
+    unit:
+    laboratory_method:
+    extraction_ratio:
+    crop:
+    region:
+    classification: *classification_not_approved

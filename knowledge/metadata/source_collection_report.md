@@ -1,65 +1,45 @@
-# RAG Source Collection Report
+# Báo cáo cập nhật nguồn tri thức
 
-Ngay tao: 2026-07-07
+Ngày cập nhật: 2026-07-13
 
-## Tom tat
+## Thống kê
 
-Da tao thu vien tri thuc ban dau cho Regression Kriging / Digital Soil Mapping.
+- Tổng nguồn: 52.
+- Core: 45.
+- Supporting: 7.
+- Evidence cards: 22.
+- Hướng dẫn tổng hợp tiếng Việt: 6.
+- Năm xuất bản/phiên bản mới nhất trong metadata: 2026 đối với living documentation được chụp theo ngày truy cập; báo cáo chính thức mới nhất là ISRIC WoSIS 2025.
 
-- Tong so nguon trong `sources.csv`: 26
-- Nguon core: 18
-- Nguon supporting: 8
-- Evidence cards: 10
-- Vector/embedding index: chua tao
-- PDF/raw library: chua tai va khong commit vao Git
+## Nội dung đã bổ sung
 
-## Nhom chu de da phu
+1. Thiết kế mẫu: cLHS gốc, thiết kế theo mục tiêu, nested FULL/REDUCED và validation sampling.
+2. Covariates: đúng collection/asset cho Sentinel-2, Cloud Score+, CHIRPS, SRTM và MERIT Hydro; paper nền cho NDVI, TWI và Earth Engine.
+3. PCA và Soil Type: PCA toàn hạng, reference đóng băng, categorical encoding và sample support.
+4. DSM và validation: spatial CV, independent probability validation, AOA, uncertainty calibration và map support.
+5. Phòng lab: FAO GLOSOLAN, USDA KSSL 2022, USDA Field Book 2024 và ISRIC WoSIS 2025.
+6. Dinh dưỡng: FAO GSNmap 2022, FAO plant nutrition và ví dụ nutrient mapping quy mô vùng.
 
-```text
-- Nen tang dia thong ke: variogram, kriging, stationarity, uncertainty.
-- Regression Kriging: trend + residual variogram + kriged residual.
-- Digital Soil Mapping: SCORPAN/covariates, DSM history, SoilGrids.
-- Spatial cross-validation: random CV risk, block/spatial CV.
-- Metrics: RMSE, MAE, ME, R2_pred, NSE, RPD/RPIQ.
-- Soil nutrients: nguon guideline ho tro dien giai nong hoc.
-```
+## Sửa metadata cũ
 
-## Nguon can kiem chung them
+- brus_2019_sampling_dsm đã có DOI 10.1016/j.geoderma.2018.07.036, URL WUR và nâng thành core.
+- usda_2014_kslm_methods được thay bằng usda_2022_kssl_methods, SSIR 42 v6.0 Part 1.
+- Taxonomy được mở rộng và có alias Việt–Anh.
+- Các DOI lặp ở catalog đã được bỏ; paper và catalog vẫn liên kết qua notes/doc_id.
 
-`brus_2019_sampling_dsm` dang de DOI trong metadata la trong vi can kiem chung DOI truoc khi nang len `core`.
+## Nguyên tắc kiểm chứng
 
-## Evidence cards da tao
+- Core cần DOI hoặc URL chính thức có thể kiểm tra.
+- Living documentation dùng năm của access snapshot và ghi rõ trong license note.
+- Không lưu full text có bản quyền; curated corpus chỉ chứa metadata, tóm tắt tự viết và evidence cards.
+- Ngưỡng dinh dưỡng chỉ được dùng khi crop, vùng, phương pháp và đơn vị tương thích.
+- Nguồn exact asset được ưu tiên cho provenance; paper gốc được ưu tiên cho claim phương pháp.
 
-```text
-- rk_residual_workflow_001
-- rk_baseline_comparison_001
-- spatial_cv_random_bias_001
-- cv_refit_leakage_001
-- variogram_range_cutoff_001
-- nugget_sill_weak_structure_001
-- uncertainty_kriging_variance_limits_001
-- dsm_covariates_validation_001
-- metrics_multi_metric_assessment_001
-- soil_nutrient_class_accuracy_001
-```
+## Khoảng trống còn lại
 
-## Gioi han hien tai
+- Chưa có guideline chính thức riêng cho ngưỡng dinh dưỡng cây mía tại đúng vùng dự án và đúng phương pháp lab.
+- Chưa có bộ independent probability validation ngoài thực địa.
+- Chưa có calibration set để gọi uncertainty map là prediction interval.
+- Cần cập nhật metadata method/unit ngay khi phòng lab trả kết quả.
 
-```text
-- Day la seed library, khong phai toan bo tai lieu khoa hoc cua linh vuc.
-- Chua tai PDF va chua tao embedding index.
-- Chua co retrieval engine that.
-- Chua co rag_assessment generator tu dong tu run_result.json.
-- Cac threshold khoa hoc van phai ap dung theo ngu canh du lieu, vung nghien cuu va thiet ke lay mau.
-```
-
-## Buoc tiep theo de nang cap
-
-```text
-1. Kiem chung DOI/URL cho tat ca nguon supporting.
-2. Them source cho tung chi tieu dat theo bo nguong dia phuong/cay trong neu co.
-3. Tao summaries rieng cho tung source, khong copy full text co ban quyen.
-4. Tao keyword retrieval truoc embedding.
-5. Tao script sinh rag_assessment_<run_id>.json tu run_result.json + evidence cards.
-6. Sau khi co cong cu embedding duoc phep, moi tao vector index trong knowledge/index/vector_store/.
-```
+Các khoảng trống trên là điều kiện chờ dữ liệu/ngữ cảnh địa phương, không được bù bằng ngưỡng hoặc citation suy đoán.

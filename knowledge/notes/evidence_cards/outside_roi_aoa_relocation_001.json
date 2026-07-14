@@ -1,0 +1,20 @@
+{
+  "claim_id": "outside_roi_aoa_relocation_001",
+  "claim": "A sample outside the map ROI is not automatically invalid for model fitting, but usefulness depends on membership in the same target population, compatible sample support and covariate-space area of applicability; convenience relocation is not independent probability validation.",
+  "applies_to": [
+    "field_sampling",
+    "sample_relocation",
+    "area_of_applicability",
+    "target_population"
+  ],
+  "evidence_sources": [
+    "meyer_pebesma_2021_aoa",
+    "brus_2019_sampling_dsm",
+    "brus_kempen_heuvelink_2011_validation"
+  ],
+  "strength": "strong",
+  "conditions": "Applies to actual samples moved from planned locations because of access constraints, including the 22 current locations outside ROI.",
+  "limitations": "AOA is a model- and covariate-dependent diagnostic and does not prove causal similarity or remove sampling bias.",
+  "recommended_action": "Retain the actual coordinates, compute planned-to-actual distance and relocation reason when available, check covariate dissimilarity/AOA, fit with and without questionable points as sensitivity analysis, and mask final maps to ROI.",
+  "not_allowed_action": "Do not discard points solely because they cross the ROI boundary, and do not call convenience-relocated points an independent validation set."
+}

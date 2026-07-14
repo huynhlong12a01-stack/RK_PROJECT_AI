@@ -1,0 +1,20 @@
+{
+  "claim_id": "residual_sd_not_total_uncertainty_001",
+  "claim": "Residual kriging standard deviation represents only the kriged residual component under model assumptions; it is not automatically total predictive uncertainty or a calibrated prediction interval.",
+  "applies_to": [
+    "uncertainty",
+    "regression_kriging",
+    "map_production",
+    "reporting"
+  ],
+  "evidence_sources": [
+    "schmidinger_heuvelink_2023_uncertainty",
+    "globalsoilmap_2015_specs",
+    "hengl_2007_about_rk"
+  ],
+  "strength": "strong",
+  "conditions": "Applies to current RK_STD outputs unless trend-model, parameter, transformation and residual uncertainty are combined and externally calibrated.",
+  "limitations": "Even nominal coverage can hide asymmetric or location-dependent miscalibration.",
+  "recommended_action": "Label the layer residual kriging SD, validate uncertainty with coverage plus calibration/sharpness diagnostics, and only publish 90 or 95 percent intervals after calibration.",
+  "not_allowed_action": "Do not label RK_STD a 90 percent or 95 percent prediction interval without a defined construction and validation."
+}

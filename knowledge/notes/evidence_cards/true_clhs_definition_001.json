@@ -1,0 +1,18 @@
+{
+  "claim_id": "true_clhs_definition_001",
+  "claim": "Conditioned Latin hypercube sampling is an optimization design that seeks agreement with ancillary continuous distributions, categorical proportions and dependence structure; a nearest-candidate Latin-hypercube design with spacing rules should be described as cLHS-like unless it implements the cLHS objective.",
+  "applies_to": [
+    "sample_design",
+    "conditioned_latin_hypercube",
+    "clhs_like"
+  ],
+  "evidence_sources": [
+    "minasny_mcbratney_2006_clhs",
+    "brus_2019_sampling_dsm"
+  ],
+  "strength": "strong",
+  "conditions": "Use this distinction when naming the sampling algorithm and comparing it with published cLHS implementations.",
+  "limitations": "Alternative algorithms may still provide good coverage, but their performance must be demonstrated with explicit QA rather than inferred from the cLHS name.",
+  "recommended_action": "Name the current design spatially constrained, soil-stratified Latin-hypercube or cLHS-like, and report continuous, categorical, correlation and spatial-coverage diagnostics.",
+  "not_allowed_action": "Do not claim that the custom engine is the original cLHS optimizer without an equivalent objective and optimization procedure."
+}

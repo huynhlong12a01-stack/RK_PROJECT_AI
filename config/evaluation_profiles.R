@@ -8,7 +8,7 @@
 
 EVALUATION_PROFILES <- list(
   # Example override:
-  # pH = list(
+  # pH_H2O = list(
   #   rmse_thresholds = list(excellent = 0.20, good = 0.30, acceptable = 0.50),
   #   valid_range = list(min = 3.0, max = 10.0),
   #   soft_warning_range = list(min = 3.5, max = 9.5)

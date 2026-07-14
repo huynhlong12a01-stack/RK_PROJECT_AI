@@ -28,12 +28,12 @@ ok("variance back-transform honors bias-correction setting")
 
 TARGET_TRANSFORM <- "log1p"
 EVALUATION_PROFILE_FILE <- "config/evaluation_profiles.R"
-res <- resolve_target_transform("P", c(1, 2, 8, 30, 120))
-if (!identical(res$selected, "log1p")) fail("P profile with positive values should allow log1p")
-if (!isTRUE(res$requires_nonnegative)) fail("P profile should require non-negative values")
+res <- resolve_target_transform("P_Olsen_mgkg", c(1, 2, 8, 30, 120))
+if (!identical(res$selected, "log1p")) fail("P_Olsen profile with positive values should allow log1p")
+if (!isTRUE(res$requires_nonnegative)) fail("P_Olsen profile should require non-negative values")
 ok("profile-based log1p transform resolves for positive nutrient values")
 
-res_neg <- resolve_target_transform("P", c(-0.1, 1, 2, 3))
+res_neg <- resolve_target_transform("P_Olsen_mgkg", c(-0.1, 1, 2, 3))
 if (!identical(res_neg$selected, "none") || is.null(res_neg$warning)) fail("negative nutrient values should fallback from log1p to none")
 ok("profile-based nonnegative rule protects log1p from negative nutrient values")
 

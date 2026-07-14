@@ -74,7 +74,16 @@ resolve_target_transform <- function(target_field, values) {
   }
 
   profiles <- load_evaluation_profiles(EVALUATION_PROFILE_FILE %||% "config/evaluation_profiles.R")
-  profile <- match_indicator_profile(target_field, profiles)
+  profile_override <- if (exists("TARGET_PROFILE_OVERRIDE"))
+    TARGET_PROFILE_OVERRIDE else NULL
+  if (!is.null(profile_override) && profile_override %in% names(profiles)) {
+    profile <- profiles[[profile_override]]
+    profile$profile_name <- profile_override
+    profile$profile_matched <- TRUE
+    profile$profile_ambiguous <- FALSE
+  } else {
+    profile <- match_indicator_profile(target_field, profiles)
+  }
   recommendation <- rk_eval_transform_recommendation(values, profile)
   selected <- if (identical(requested, "auto")) recommendation$transform else requested
   selected <- tolower(as.character(selected %||% "none"))

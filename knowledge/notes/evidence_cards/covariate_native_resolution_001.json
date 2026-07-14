@@ -1,0 +1,21 @@
+{
+  "claim_id": "covariate_native_resolution_001",
+  "claim": "A 10 m computational output grid does not imply 10 m effective information for every covariate; resampling a coarser raster changes the grid representation but does not create new spatial detail.",
+  "applies_to": [
+    "covariate_preprocessing",
+    "scale_and_support",
+    "raster_resampling",
+    "map_production"
+  ],
+  "evidence_sources": [
+    "google_s2_sr_harmonized_catalog",
+    "google_srtmgl1_catalog",
+    "google_merit_hydro_catalog",
+    "google_chirps_daily_catalog"
+  ],
+  "strength": "strong",
+  "conditions": "Current inputs include Sentinel-2 NDVI at 10 m, SRTM terrain at about 30 m, MERIT Hydro at 92.77 m and CHIRPS at about 5566 m.",
+  "limitations": "Effective resolution also depends on compositing, terrain derivatives, geolocation error and model smoothing.",
+  "recommended_action": "Call 10 m the computational grid and publish each layer's asset ID, native resolution, resampling method and temporal aggregation.",
+  "not_allowed_action": "Do not present every mapped pixel as an independent 10 m measurement."
+}
