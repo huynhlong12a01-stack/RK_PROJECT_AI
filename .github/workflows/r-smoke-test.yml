@@ -227,6 +227,9 @@ jobs:
               (($blockerOutput | Out-String) -notmatch "\[BLOCKED\]")) {
             throw "Synthetic-reference blocker did not fail closed."
           }
+          # GitHub's pwsh wrapper propagates LASTEXITCODE after the script.
+          # The expected fail-closed exit was validated above, so consume it.
+          $global:LASTEXITCODE = 0
 
           $runtimeManifest = Join-Path $project "MOCK_RUN_MANIFEST.json"
           $runtimeGate = Join-Path $project (
