@@ -201,7 +201,7 @@ jobs:
           }
           if ($orchestrator.Contains('ensure_mock_pca_reference_compat') -or
               (Test-Path -LiteralPath (Join-Path $project (
-              '_NOI_BO\pipeline\ensure_mock_pca_reference_compat.py'))) {
+              '_NOI_BO\pipeline\ensure_mock_pca_reference_compat.py')))) {
             throw "Obsolete PCA reference rewriter must not be present."
           }
           foreach ($runnerName in @(
