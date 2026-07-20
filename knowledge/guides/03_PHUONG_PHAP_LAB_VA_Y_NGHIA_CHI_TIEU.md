@@ -2,7 +2,7 @@
 
 ## Nguyên tắc dữ liệu
 
-Dự án coi mỗi dòng là một kết quả trung bình đại diện cho mẫu 0–30 cm. Không tách tầng. Tuy vậy, tên chỉ tiêu một mình chưa đủ để xác định ý nghĩa phân tích.
+Dự án coi mỗi dòng là một kết quả trung bình duy nhất cho mẫu. Ứng dụng không yêu cầu cột độ sâu và không tách tầng. Tuy vậy, tên chỉ tiêu một mình chưa đủ để xác định ý nghĩa phân tích.
 
 Các trường tối thiểu cần có ở cấp metadata cho mỗi cột kết quả:
 

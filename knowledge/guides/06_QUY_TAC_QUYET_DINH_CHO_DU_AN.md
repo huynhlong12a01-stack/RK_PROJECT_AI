@@ -3,7 +3,7 @@
 ## Quy trình 1 — Thiết kế mẫu
 
 - ROI bắt buộc; Soil Type tùy chọn nhưng phải có field hợp lệ.
-- Gọi thuật toán hiện tại là cLHS-like/spatially constrained LHS.
+- Ưu tiên lõi CRAN clhs; chỉ các điểm clhs_core là đầu ra optimizer. FULL là thiết kế lai. Nếu fallback, phải ghi rõ python_clhs_like và lý do.
 - REDUCED phải là tập con của FULL.
 - Không công bố “đảm bảo chất lượng” cho REDUCED.
 - PCA reference phải được lưu và đóng băng.
@@ -14,7 +14,7 @@
 - sample_actual.csv là vị trí thực tế và kết quả trung bình; không thay bằng điểm kế hoạch.
 - Điểm ngoài ROI được giữ để đánh giá, không tự loại và cũng không tự chấp nhận.
 - Thiếu covariate phải được bổ sung cùng pipeline/provenance của workflow 1.
-- Soil Type là categorical; Other phải được báo.
+- Soil Type là categorical. Thiết kế cLHS giữ mọi lớp hợp lệ và Unmapped; nhánh nội suy phải báo rõ nếu nhóm hiếm được gộp Other.
 - So sánh PC_ONLY và PC_PLUS_SOIL, không ưu tiên mô hình Soil theo mặc định.
 - Map cuối mask ROI; AOA/extrapolation và uncertainty phải là lớp QA riêng.
 

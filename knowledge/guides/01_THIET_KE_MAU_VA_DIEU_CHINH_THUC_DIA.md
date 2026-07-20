@@ -6,9 +6,11 @@ Tài liệu này nối cơ sở khoa học với quy trình 01_THIET_KE_LAY_MAU.
 
 ## Gọi đúng thuật toán hiện tại
 
-cLHS theo Minasny & McBratney (2006) là một bài toán tối ưu nhằm khớp phân bố biên của biến liên tục, tỷ lệ lớp phân loại và cấu trúc phụ thuộc của dữ liệu phụ trợ. Engine hiện tại tạo các đích Latin-hypercube theo nhóm đất, ghép với ứng viên gần trong không gian PCA và áp ràng buộc khoảng cách. Vì vậy tên đúng là “thiết kế Latin-hypercube phân tầng Soil Type và có ràng buộc không gian” hoặc “cLHS-like”.
+cLHS theo Minasny & McBratney (2006) là một bài toán tối ưu nhằm khớp phân bố biên của biến liên tục, tỷ lệ lớp phân loại và cấu trúc phụ thuộc của dữ liệu phụ trợ.
 
-Không gọi là cLHS chuẩn nếu chưa triển khai hàm mục tiêu và quá trình tối ưu tương đương nguồn gốc.
+Engine hiện ưu tiên lõi tối ưu chính thức từ gói CRAN clhs. REDUCED chỉ gồm các điểm clhs_core do optimizer chọn trực tiếp, không snapping hoặc thay điểm hậu xử lý. Thuật toán simulated annealing là nghiệm tối ưu ngẫu nhiên, không phải bằng chứng đạt tối ưu toàn cục. FULL là thiết kế lai: lõi CRAN cLHS cộng spatial infill và short-lag support; vì vậy không được gọi toàn bộ FULL là đầu ra cLHS thuần.
+
+Nếu backend chính thức không khả dụng và cấu hình cho phép fallback, QA phải ghi backend_used=python_clhs_like, fallback_reason và design_role=lhs_core. Fallback khi đó mới được gọi là cLHS-like hoặc spatially constrained soil-stratified LHS; không được mô tả như optimizer gốc.
 
 Nguồn: minasny_mcbratney_2006_clhs, DOI [10.1016/j.cageo.2005.12.009](https://doi.org/10.1016/j.cageo.2005.12.009); brus_2019_sampling_dsm, DOI [10.1016/j.geoderma.2018.07.036](https://doi.org/10.1016/j.geoderma.2018.07.036).
 

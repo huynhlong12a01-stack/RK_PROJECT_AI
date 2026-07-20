@@ -26,6 +26,7 @@ Mở `01_THIET_KE_LAY_MAU/02_KET_QUA/sampling_QA.json` và kiểm tra:
 - nếu `backend_used=python_clhs_like`: `is_original_clhs_optimizer_core=false`, lõi là `lhs_core`, và phải đọc `fallback_reason`;
 - `raw_covariate_coverage.raw_covariates.coverage_fraction` phải đạt ngưỡng; AKS_2026 hiện là 1,0;
 - PCA phải ghi `n_input=5`, `n_retained=5`, `dimension_reduction_applied=false`, frozen reference và SHA-256;
+- `pca_input_lineage_verified=true`; `raw_covariate_sha256` có đúng 5 khóa; `pca_raster_sha256` có đúng PC1–PC5; `reference_file_sha256` khớp file reference hiện tại;
 - đọc `sampling_QA_FULL.json` và `sampling_QA_REDUCED.json` riêng; các chỉ số mô tả không chứng minh hai phương án có độ chính xác tương đương;
 - đọc `covariate_provenance.json`; không diễn giải CHIRPS/DEM/Slope/TWI như nguồn chi tiết 10 m;
 - không có cảnh báo điểm nằm ngoài ROI thiết kế.
@@ -38,17 +39,22 @@ CSV phục vụ danh sách thực địa; GeoJSON phục vụ kiểm tra trên G
 
 Các báo cáo kỹ thuật nằm trong `_NOI_BO/work/interpolation/qa`. Người dùng có thể đọc nhưng không sửa:
 
-- `preflight_summary.json`: tổng số mẫu, số trong/ngoài ROI, số điểm có PC đầy đủ, số điểm cần tải hỗ trợ và các chỉ tiêu đã có kết quả.
+- `preflight_summary.json`: tổng số mẫu, số trong/ngoài ROI, số điểm có PC đầy đủ, số điểm có thể tái tạo PCA cục bộ từ raw Quy trình 1, số điểm thật sự cần tải hỗ trợ và các chỉ tiêu đã có kết quả.
 - `sample_roi_status.csv`: trạng thái từng điểm so với ROI và coverage.
 - `outside_sample_review.csv` trong thư mục đầu vào: chỉ xuất hiện khi có điểm ngoài ROI; đây là bảng người dùng xác nhận target population/sampling support, không phải file kết quả lab.
 - `sensitivity_plan.json`: kế hoạch so sánh ALL_ACTUAL, INSIDE_ROI_ONLY và nhóm đã xác nhận; không dùng nhóm ngoài ROI làm validation giả.
-- `pca_support_point_coverage.csv`/`pca_support_summary.json`: xuất hiện khi phải bổ sung covariates/PCA.
-- `pca_current_provenance.json`: hash PC1–PC5 và hash frozen PCA reference; chỉ trạng thái `verified` mới được tái sử dụng như PCA đáng tin cậy.
+- `pca_current_provenance.json`: chỉ tin khi `verification_status=verified_full_hash_chain`, hash PC1–PC5 và frozen PCA reference khớp. Đường chính phải ghi `provenance_mode=local_rebuild_from_verified_workflow1_raw_covariates`, nối tới hash raw/PC/PCA summary/sidecar/lưới của Quy trình 1, `analytical_support_mask_policy=workflow1_pc_mask_plus_actual_sample_cells_local_only` và xác nhận không truyền dữ liệu ngoài.
+- `pca_support_point_coverage.csv`/`pca_support_summary.json`: chỉ xuất hiện khi raw Quy trình 1 thật sự thiếu và phải dùng nhánh tải bổ sung.
+- `support_geometry_privacy.json`: với nhánh GEE dự phòng, kiểm `status=certified_by_preflight`, nguồn hình học là bounding envelope ROI cộng fixed buffer, đúng hash ROI và hash file support, đúng một feature với schema tối thiểu, đồng thời mọi cờ dùng/chứa tọa độ hoặc mã mẫu đều là `false`.
+- `gee_support_download_summary.json`: kiểm `privacy_gate.status=verified_before_gee_initialization`, `geometry_certified_by_preflight_hash_chain=true`, schema thuộc tính tối thiểu, hash ROI/support khớp file hiện tại và `sample_coordinates_or_identifiers_sent=false`. `source_identity`, `output_grid` và hash năm raw covariates phải đầy đủ.
+- Với nhánh GEE, `pca_current_provenance.json` còn phải nối bằng SHA-256 tới download sidecar, privacy sidecar, source identity, output grid và năm raw covariates tải về. Không dùng một cờ so sánh hình học đơn lẻ thay cho chuỗi kiểm chứng này.
 - `soil_predictor_summary.json`: nhóm tham chiếu, nhóm giữ lại, nhóm `Other` và các biến giả.
 - `soil_predictor_point_groups.csv`: nhóm Soil Type gán cho từng mẫu.
 - `raster_schema_current.json`: kiểm tra predictor ở điểm và raster có cùng tên, loại và phạm vi hợp lệ.
 
 Với AKS_2026 hiện tại, QA đã ghi nhận 94 mẫu, gồm 72 trong ROI và 22 ngoài ROI; cả 94 có PC1–PC5 đầy đủ tại lần kiểm tra gần nhất. Con số này phải được kiểm tra lại sau mỗi lần thay đổi `sample_actual.csv`.
+
+Nếu chưa có chỉ tiêu lab, trạng thái hợp lệ là `WAITING_LAB`: predictor/PCA/Soil Type và QA đã sẵn sàng, tiến trình kết thúc thành công và số bản đồ mới bằng 0. Bounding envelope tải GEE, nếu có, không phải prediction domain; miền phân tích chỉ là mask PC Quy trình 1 cộng các ô chứa mẫu, còn miền bản đồ cuối là `ROI_field_area`. Nếu cần đổi khoảng tải dự phòng, chỉ sửa `covariate_support_buffer_m` trong `THONG_SO_DU_AN.yml`; không sửa support hoặc cấu hình trong `_NOI_BO`.
 
 ## Chọn giữa `PC_ONLY` và `PC_PLUS_SOIL`
 
@@ -93,3 +99,9 @@ Khi pure nugget, dự báo cuối có thể là regression-only và không có r
 ## Giới hạn khi ra quyết định dinh dưỡng
 
 Bản đồ thể hiện ước lượng không gian của kết quả phân tích đất theo phương pháp đã dùng. Nó không tự động là bản đồ khuyến cáo phân bón. Việc phân hạng thiếu/đủ/thừa và khuyến cáo liều lượng còn cần ngưỡng đã được phê duyệt cho cây mía, điều kiện địa phương, đơn vị/phương pháp lab, năng suất mục tiêu và hiệu chuẩn nông học.
+
+### QA lineage và predictor Soil Type
+
+Trong `soil_type_lineage` của QA thiết kế và `_NOI_BO/work/design/qa/soil_group_summary.json`, kiểm tra `schema_version=3.0.0`, `soil_source_sha256`, `source_field`, `encoding`, `code_map_sha256`, `soil_group_raster_sha256` và `whole_domain_overlap_qa.passed=true`.
+
+Trong `soil_predictor_summary.json`, kiểm tra thêm `workflow1_soil_lineage.verified=true`, `soil_source_sha256`, `model_group_code_map_sha256`, `output_file_sha256`, tỷ lệ `unmapped`, overlap toàn miền và `unsupported_prediction_groups_assigned_reference_effect`. `Other` chỉ được phép chứa lớp nguồn đã map nhưng thiếu mẫu; `Unmapped` luôn là thiếu coverage polygon. Mọi hash output phải khớp file hiện tại trước khi tin dùng nhánh `PC_PLUS_SOIL`.

@@ -1,20 +1,22 @@
 # Bước 0 — Xác lập vùng mía
 
+Cấu hình chung lấy từ `THONG_SO_DU_AN.yml` ở gốc dự án. Với `crs_mode: auto`, ứng dụng tự xác định múi UTM từ tâm ROI field/search và đồng bộ CRS cho cả ba giai đoạn. Nếu phạm vi rộng hơn 6° kinh độ, ứng dụng dừng; chỉ chuyển sang `crs_mode: manual` trong `THONG_SO_DU_AN.yml` sau khi chuyên gia GIS xác nhận `crs_epsg`. GEE project và `resolution_m` cũng chỉ sửa tại tệp chung này.
+
 Bước này tạo `ROI_field_area` đã được xác nhận trước khi tải covariates và thiết kế mẫu.
 
 ## Trường hợp A — đã có ranh giới vùng mía
 
 Đặt `00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_field_area.geojson`, rồi nhấp `CHAY_XAC_LAP_VUNG_MIA.bat`.
 
-Ứng dụng kiểm tra CRS, hình học, diện tích, hash và tạo bản tương thích kỹ thuật cho Quy trình 1. `roi.geojson` của dự án cũ chỉ được nhận để di chuyển có kiểm soát; người dùng nên quản lý một nguồn chính là `roi_field_area.geojson`.
+Ứng dụng kiểm tra CRS, hình học, diện tích và hash. Các bước thiết kế mẫu và nội suy đọc trực tiếp nguồn duy nhất 01_DAU_VAO/roi_field_area.geojson; ứng dụng không tạo bản sao ROI ở Quy trình 1.
 
 ## Trường hợp B — chưa có ranh giới vùng mía
 
 Đặt trong `01_DAU_VAO`:
 
 - `roi_search.geojson`: ranh giới huyện/tỉnh cần tìm;
-- `sugarcane_labels.csv`: điểm đã kiểm chứng;
-- `interpretation.yml`: GEE project, chuỗi thời gian, CRS và cổng QA.
+- sao chép `sugarcane_labels_template.csv` thành `sugarcane_labels.csv` rồi điền điểm đã kiểm chứng;
+- `interpretation.yml`: chuỗi thời gian, phenology và cổng QA; GEE/CRS/lưới lấy từ `THONG_SO_DU_AN.yml`.
 
 Cột nhãn:
 
@@ -58,7 +60,7 @@ Kết quả có thể gồm:
 
 Ứng viên không tự động trở thành ROI. Hãy đối chiếu ảnh cùng thời kỳ, ranh giới lô và hiểu biết thực địa; sửa lỗi bỏ sót/nhầm; lưu bản duyệt thành `roi_field_area.geojson`; chạy lại Bước 0.
 
-Lưới 10 m là lưới tính toán/xuất. Nó không chứng minh mọi đặc trưng, ranh giới hoặc độ chính xác đều có support thực ở 10 m.
+Lưới do `resolution_m` quy định chỉ là lưới tính toán/xuất. Nó không chứng minh mọi đặc trưng, ranh giới hoặc độ chính xác đều có support thực ở kích thước đó.
 
 ## Tái sử dụng AKS_2026
 

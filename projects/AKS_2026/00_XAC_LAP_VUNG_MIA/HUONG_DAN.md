@@ -1,8 +1,8 @@
 # AKS_2026 — Bước 0: xác lập vùng mía
 
-AKS_2026 đã có ranh giới mía đáng tin cậy. Nguồn người dùng nên quản lý là `01_DAU_VAO/roi_field_area.geojson`; ranh giới `roi.geojson` cũ ở Quy trình 1 chỉ được nhận để di chuyển/tương thích.
+AKS_2026 đã có ranh giới mía đáng tin cậy. Nguồn duy nhất được quản lý là 01_DAU_VAO/roi_field_area.geojson; Quy trình 1 và Quy trình 2 đọc trực tiếp tệp này.
 
-Nhấp `CHAY_XAC_LAP_VUNG_MIA.bat` để kiểm tra hình học, CRS, diện tích, hash và ghi QA. Bước này không tự biến ROI thành một mô hình phân loại.
+Kiểm tra cấu hình chung tại `..\THONG_SO_DU_AN.yml`, rồi nhấp `CHAY_XAC_LAP_VUNG_MIA.bat` để kiểm tra hình học, CRS, diện tích, hash và ghi QA. CRS, GEE và `resolution_m` chỉ sửa tại tệp chung; Bước này không tự biến ROI thành một mô hình phân loại.
 
 ## Ý nghĩa gói tham chiếu AKS
 

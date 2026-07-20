@@ -16,7 +16,7 @@ WORK = PROJECT / "_NOI_BO" / "work" / "design"
 ALIGNED = WORK / "_aligned"
 REFERENCE = PROJECT / "_NOI_BO" / "config" / "pca_model_reference.json"
 TEMPLATE = WORK / "grid_template.tif"
-ROI = PROJECT / "01_THIET_KE_LAY_MAU" / "01_DAU_VAO" / "roi.geojson"
+ROI = PROJECT / "00_XAC_LAP_VUNG_MIA" / "01_DAU_VAO" / "roi_field_area.geojson"
 FEATURES = ["CHIRPS", "DEM", "NDVI", "Slope", "TWI"]
 NODATA = -9999.0
 

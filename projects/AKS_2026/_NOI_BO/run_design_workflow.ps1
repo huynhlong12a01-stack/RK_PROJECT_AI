@@ -5,6 +5,9 @@ $internal = $PSScriptRoot
 $project = Split-Path -Parent $internal
 $root = Resolve-Path (Join-Path $project "..\..")
 Set-Location $root
+$rLibrary = Join-Path $root '_UNG_DUNG\runtime\R_library'
+New-Item -ItemType Directory -Path $rLibrary -Force | Out-Null
+$env:R_LIBS_USER = $rLibrary
 $input = Join-Path $project "01_THIET_KE_LAY_MAU\01_DAU_VAO"
 $result = Join-Path $project "01_THIET_KE_LAY_MAU\02_KET_QUA"
 $work = Join-Path $internal "work\design"
@@ -15,11 +18,11 @@ $logDir = Join-Path $internal "logs"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
 function PythonPath {
-  $preferred = "D:\apps\POINT_PLANNING_APP\.venv\Scripts\python.exe"
-  if (Test-Path -LiteralPath $preferred) { return $preferred }
+  $local = Join-Path $root '.venv\Scripts\python.exe'
+  if (Test-Path -LiteralPath $local -PathType Leaf) { return $local }
   $cmd = Get-Command python -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Source }
-  throw "Khong tim thay Python. Hay cai dat moi truong truoc khi chay."
+  throw "Khong tim thay Python. Hay chay CAI_DAT_UNG_DUNG.bat o thu muc goc."
 }
 function RscriptPath {
   $cmd = Get-Command Rscript -ErrorAction SilentlyContinue
@@ -36,16 +39,24 @@ function Test-PcaQaCurrent([string]$Path) {
   try {
     $qa = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
     return (
+      [string]$qa.schema_version -eq '2.0.0' -and
       [int]$qa.n_input -eq 5 -and
       [int]$qa.n_retained -eq 5 -and
       $qa.dimension_reduction_applied -eq $false -and
       $qa.reference_frozen -eq $true -and
+      $qa.pca_input_lineage_verified -eq $true -and
+      @($qa.raw_covariate_sha256.PSObject.Properties).Count -eq 5 -and
+      @($qa.pca_raster_sha256.PSObject.Properties).Count -eq 5 -and
+      [string]$qa.raw_provenance_sha256 -match '^[0-9a-f]{64}$' -and
+      [string]$qa.reference_file_sha256 -match '^[0-9a-f]{64}$' -and
       [string]$qa.reference_hash -match '^[0-9a-f]{64}$'
     )
   } catch { return $false }
 }
 
-$roi = Join-Path $input "roi.geojson"
+& "$internal\sync_settings.ps1"
+RunChecked (PythonPath) @((Join-Path $pipeline 'configure_project_crs.py'), '--project-dir', $project)
+$roi = Join-Path $project "00_XAC_LAP_VUNG_MIA\01_DAU_VAO\roi_field_area.geojson"
 $fieldQaPath = Join-Path $project "00_XAC_LAP_VUNG_MIA\02_KET_QUA\field_area_QA.json"
 $fieldApproved = $false
 if (Test-Path -LiteralPath $fieldQaPath -PathType Leaf) {
@@ -73,7 +84,6 @@ if (-not $fieldApproved -or -not (Test-Path -LiteralPath $roi -PathType Leaf)) {
   throw "Chi ROI_field_area da duoc review va APPROVED_FOR_SAMPLE_DESIGN moi duoc dua vao thiet ke; candidate khong duoc tu dong su dung."
 }
 if (-not (Test-Path -LiteralPath $settings -PathType Leaf)) { throw "Thieu sampling.yml. Dat file tai: $settings" }
-& "$internal\sync_settings.ps1"
 if (Test-Path -LiteralPath (Join-Path $input "soil_type.geojson")) {
   Write-Host "[OK] Co Soil Type; se dua nhom dat vao thiet ke." -ForegroundColor Green
 } else {
@@ -132,8 +142,21 @@ if (
 } else {
   Write-Host "[2/5] PCA va frozen reference da hop le; tai su dung." -ForegroundColor Green
 }
-Write-Host "[3/5] Dang xu ly Soil Type tuy chon..." -ForegroundColor Cyan
+# PCA may have been created or refreshed after the first coverage check. Re-run
+# the gate so downstream sampling QA is based on the current PC rasters and lineage.
+RunChecked $python @("projects\AKS_2026\_NOI_BO\pipeline\ensure_design_covariates.py")
+$coverage = Get-Content -LiteralPath $coverageQa -Raw | ConvertFrom-Json
+if (-not [bool]$coverage.pca_grid_ready) {
+  throw "PCA lineage does not match the current raw covariates. Re-run Workflow 1 from the beginning."
+}
+Write-Host "[3/5] Dang xu ly Soil Type tuy chon va khoa lineage..." -ForegroundColor Cyan
 RunChecked $python @("projects\AKS_2026\_NOI_BO\pipeline\prepare_clhs_soil.py")
+RunChecked $python @("projects\AKS_2026\_NOI_BO\pipeline\ensure_design_covariates.py")
+$coverage = Get-Content -LiteralPath $coverageQa -Raw | ConvertFrom-Json
+if (-not [bool]$coverage.soil_lineage_ready) {
+  $soilReasons = @($coverage.soil_lineage_assessment.reasons) -join '; '
+  throw "Soil Type lineage was not locked by Workflow 1: $soilReasons"
+}
 Write-Host "[4/5] Dang tao hai phuong an lay mau va QA rieng..." -ForegroundColor Cyan
 $env:RK_RSCRIPT = $rscript
 RunChecked $python @("projects\AKS_2026\_NOI_BO\pipeline\run_design_clhs_official.py")

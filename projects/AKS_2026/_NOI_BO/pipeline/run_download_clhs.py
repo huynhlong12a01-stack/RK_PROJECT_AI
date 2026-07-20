@@ -10,23 +10,25 @@ CONFIG = PROJECT / "_NOI_BO" / "config" / "project.yml"
 
 def value(name, default):
     text = CONFIG.read_text(encoding="utf-8")
-    match = re.search(rf"(?m)^\s*{re.escape(name)}\s*:\s*([^#\r\n]+)", text)
+    match = re.search(rf"(?m)^[ \t]*{re.escape(name)}[ \t]*:[ \t]*([^#\r\n]+)", text)
     return match.group(1).strip().strip('"\'') if match else default
 
 
 grid_file = PROJECT / "_NOI_BO" / "work" / "design" / "grid_template.tif"
-if not grid_file.exists():
-    grid_script = PROJECT / "_NOI_BO" / "pipeline" / "initialize_grid.py"
-    grid_spec = importlib.util.spec_from_file_location("project_grid", grid_script)
-    grid = importlib.util.module_from_spec(grid_spec)
-    grid_spec.loader.exec_module(grid)
-    grid.main()
+# Every download gets a fresh grid derived from the current reviewed ROI and
+# synchronized CRS/resolution. Reusing an old template can silently preserve a
+# former ROI extent even when ForceDownload was requested.
+grid_script = PROJECT / "_NOI_BO" / "pipeline" / "initialize_grid.py"
+grid_spec = importlib.util.spec_from_file_location("project_grid", grid_script)
+grid = importlib.util.module_from_spec(grid_spec)
+grid_spec.loader.exec_module(grid)
+grid.main()
 
 engine_path = PROJECT / "_NOI_BO" / "pipeline" / "download_sampling_satellite.py"
 spec = importlib.util.spec_from_file_location("project_download_clhs_engine", engine_path)
 engine = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(engine)
-engine.ROI_FILE = PROJECT / "01_THIET_KE_LAY_MAU" / "01_DAU_VAO" / "roi.geojson"
+engine.ROI_FILE = PROJECT / "00_XAC_LAP_VUNG_MIA" / "01_DAU_VAO" / "roi_field_area.geojson"
 engine.TEMPLATE_FILE = grid_file
 engine.OUTPUT_DIR = PROJECT / "_NOI_BO" / "work" / "design"
 engine.TILE_DIR = PROJECT / "_NOI_BO" / "work" / "design" / "qa" / "download_tiles"

@@ -1,6 +1,6 @@
 # AKS_2026
 
-Dự án có ba giai đoạn nối tiếp. Người dùng thao tác trong các thư mục `00`, `01`, `02`; không chỉnh `_NOI_BO`.
+Dự án có ba giai đoạn nối tiếp. `THONG_SO_DU_AN.yml` là nguồn duy nhất cho CRS, GEE, `resolution_m`, `covariate_support_buffer_m` và ngày covariates; ROI/nhãn, Soil Type, tham số cLHS và lab vẫn được nhập ở các tệp chuyên trách. Người dùng thao tác trong `THONG_SO_DU_AN.yml` và các thư mục `00`, `01`, `02`; không chỉnh `_NOI_BO`.
 
 ## 0. Xác lập vùng mía
 
@@ -12,7 +12,7 @@ Với dự án chưa có ROI, cần `roi_search.geojson`, nhãn địa phương 
 
 ## 1. Thiết kế lấy mẫu
 
-Trong `01_THIET_KE_LAY_MAU/01_DAU_VAO`, kiểm tra `sampling.yml` và thêm `soil_type.geojson` nếu có. ROI được lấy từ Bước 0.
+Trong `01_THIET_KE_LAY_MAU/01_DAU_VAO`, kiểm tra số mẫu/spacing/tham số cLHS trong `sampling.yml` và thêm `soil_type.geojson` nếu có. CRS, GEE, lưới và ngày covariates lấy từ `THONG_SO_DU_AN.yml`; ROI lấy từ Bước 0.
 
 Nhấp `CHAY_THIET_KE_LAY_MAU.bat`:
 

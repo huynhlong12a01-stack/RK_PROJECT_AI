@@ -1,9 +1,10 @@
 project_id: AKS_2026
+crs_mode: auto
 crs_epsg: 32649
 resolution_m: 10
 gee_project_id: rkapp-492504
-start_date: "2026-01-01"
-end_date: "2026-04-01"
+start_date: 2026-01-01
+end_date: 2026-04-01
 
 continuous_covariates: [CHIRPS, DEM, NDVI, Slope, TWI]
 soil_group_field: Ma1
@@ -11,6 +12,8 @@ soil_group_field: Ma1
 sampling_method: backend_reported_at_runtime
 method_family: conditioned_latin_hypercube_core_with_spatial_augmentation
 original_clhs_optimizer: false
+original_clhs_optimizer_core_requested: true
+full_plan_is_pure_clhs: false
 clhs_backend: auto
 clhs_auto_install: true
 clhs_repository: https://cloud.r-project.org

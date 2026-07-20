@@ -6,8 +6,10 @@ $ErrorActionPreference = "Stop"
 $internal = $PSScriptRoot
 $project = Split-Path -Parent $internal
 $root = Resolve-Path (Join-Path $project "..\..")
-Set-Location -LiteralPath $root
-
+Set-Location $root
+$rLibrary = Join-Path $root '_UNG_DUNG\runtime\R_library'
+New-Item -ItemType Directory -Path $rLibrary -Force | Out-Null
+$env:R_LIBS_USER = $rLibrary
 $modelWork = Join-Path $internal "work\models"
 $manifestFile = Join-Path $modelWork "qa\sensitivity_input_manifest.csv"
 $primaryFile = Join-Path $modelWork "input\soil_points.csv"
@@ -131,7 +133,7 @@ try {
         $env:RK_SENSITIVITY_BASE_CONFIG = $branch.Config
         $env:RK_SENSITIVITY_POINT_FILE = $scenario.PointFile
         $env:RK_SENSITIVITY_OUTPUT_ROOT = $outputRoot
-        Run-Checked $rscript.Source @("scripts\main.R")
+        Run-Checked $rscript.Source @("_UNG_DUNG\engine\scripts\main.R")
       }
     }
   }

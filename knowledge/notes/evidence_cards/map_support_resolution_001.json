@@ -13,7 +13,7 @@
     "usda_2017_soil_survey_manual"
   ],
   "strength": "strong",
-  "conditions": "The project treats each laboratory result as one average 0-30 cm sample value and predicts on a raster grid.",
+  "conditions": "The project treats each laboratory result as one average value per sample, does not stratify by depth, and predicts on a raster grid.",
   "limitations": "Within-cell and within-composite variation is not resolved by the model and can be substantial.",
   "recommended_action": "State depth convention, composite protocol, grid size, native covariate resolutions and intended map scale in the report.",
   "not_allowed_action": "Do not interpret sub-pixel variation or extra decimal precision as observed soil detail."

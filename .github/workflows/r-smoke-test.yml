@@ -1,4 +1,4 @@
-name: R smoke tests
+name: RK_R_Project smoke tests
 
 "on":
   push:
@@ -6,7 +6,7 @@ name: R smoke tests
   workflow_dispatch:
     inputs:
       run_geospatial_smoke:
-        description: "Install geospatial packages and run raster preflight on available data"
+        description: "Install geospatial packages and run scientific geospatial smoke tests"
         required: false
         default: "false"
 
@@ -22,52 +22,280 @@ jobs:
         with:
           r-version: release
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install minimal CI packages
         shell: pwsh
         run: |
-          Rscript -e "install.packages(c('jsonlite','readr','digest','yaml','openxlsx2'), repos='https://cloud.r-project.org')"
+          Rscript -e "install.packages(c('jsonlite','readr','digest','yaml','openxlsx2','clhs','dplyr','purrr','stringr','tibble','rlang'), repos='https://cloud.r-project.org')"
 
-      - name: Parse R scripts
+      - name: Install Python test packages
         shell: pwsh
         run: |
-          Rscript -e "files <- c(list.files('scripts', pattern='\\.R$', full.names=TRUE), 'rk_evaluation/evaluation.R', 'config/evaluation_profiles.R'); files <- files[file.exists(files)]; invisible(lapply(files, parse))"
+          python -m pip install --disable-pip-version-check -r _UNG_DUNG/engine/requirements.txt
 
-      - name: Check agent dependency profile
+      - name: Check Python dependency profile
         shell: pwsh
         run: |
-          Rscript scripts/check_dependencies.R --profile agent --output agent/responses/dependency_check_ci.json
+          python _UNG_DUNG/engine/scripts/check_python_dependencies.py --output _UNG_DUNG/runtime/python_dependency_check_ci.json
 
-      - name: Run input template smoke test
+      - name: Parse PowerShell scripts
         shell: pwsh
         run: |
-          Rscript scripts/input_template_smoke_test.R
+          $ErrorActionPreference = "Stop"
+          $files = Get-ChildItem -LiteralPath . -Recurse -File -Filter "*.ps1" |
+            Where-Object { $_.FullName -notmatch "\\.git\\" }
+          foreach ($file in $files) {
+            $tokens = $null
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $file.FullName, [ref]$tokens, [ref]$parseErrors
+            )
+            if ($parseErrors.Count -gt 0) {
+              $detail = $parseErrors | ForEach-Object {
+                "{0}:{1}: {2}" -f $file.FullName, $_.Extent.StartLineNumber, $_.Message
+              }
+              throw ($detail -join [Environment]::NewLine)
+            }
+          }
+          Write-Host "PowerShell parse OK: $($files.Count) files"
 
-      - name: Run transform smoke test
+      - name: Parse Python pipelines
         shell: pwsh
         run: |
-          Rscript scripts/transform_smoke_test.R
+          python -m compileall -q _UNG_DUNG/engine _UNG_DUNG/project_template/_NOI_BO/pipeline projects/AKS_2026/_NOI_BO/pipeline projects/PHU_YEN_MOCK/_NOI_BO/pipeline
 
-      - name: Run actual-sample and sensitivity unit tests
+      - name: Smoke-test project generator and user-facing links
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $projectName = "CI_GENERATOR_SMOKE"
+          $projectsRoot = [IO.Path]::GetFullPath((Join-Path $PWD "projects"))
+          $projectsPrefix = $projectsRoot.TrimEnd('\') + '\'
+          $projectPath = [IO.Path]::GetFullPath((Join-Path $projectsRoot $projectName))
+          if (-not $projectPath.StartsWith(
+              $projectsPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unsafe CI project path: $projectPath"
+          }
+          if (Test-Path -LiteralPath $projectPath) {
+            throw "CI smoke project already exists: $projectPath"
+          }
+
+          try {
+            & ".\_UNG_DUNG\engine\scripts\create_new_project.ps1" -Name $projectName
+            if (-not $?) { throw "Project generator returned a failure." }
+
+            $required = @(
+              "THONG_SO_DU_AN.yml",
+              "README.md",
+              "0_KIEM_TRA_DU_AN.bat",
+              "00_XAC_LAP_VUNG_MIA\01_DAU_VAO\interpretation.yml",
+              "00_XAC_LAP_VUNG_MIA\01_DAU_VAO\sugarcane_labels_template.csv",
+              "01_THIET_KE_LAY_MAU\01_DAU_VAO\sampling.yml",
+              "02_NOI_SUY_BAN_DO\01_DAU_VAO\sample_actual.csv",
+              "02_NOI_SUY_BAN_DO\01_DAU_VAO\indicator_metadata.yml"
+            )
+            foreach ($relativePath in $required) {
+              $candidate = Join-Path $projectPath $relativePath
+              if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                throw "Generated project is missing: $relativePath"
+              }
+            }
+
+            $commonSettings = [IO.File]::ReadAllText(
+              (Join-Path $projectPath "THONG_SO_DU_AN.yml")
+            )
+            foreach ($key in @(
+              "crs_mode:", "crs_epsg:", "resolution_m:", "gee_project_id:",
+              "sampling_start_date:", "sampling_end_date:"
+            )) {
+              if (-not $commonSettings.Contains($key)) {
+                throw "THONG_SO_DU_AN.yml is missing key: $key"
+              }
+            }
+
+            $docFiles = @(
+              Get-Item -LiteralPath "README.md"
+              Get-ChildItem -LiteralPath "docs" -Recurse -File -Filter "*.md" |
+                Where-Object { $_.FullName -notlike "*\docs\templates\*" }
+              Get-ChildItem -LiteralPath "knowledge" -Recurse -File -Filter "*.md"
+              Get-ChildItem -LiteralPath $projectPath -Recurse -File -Filter "*.md"
+            )
+            $brokenLinks = [System.Collections.Generic.List[string]]::new()
+            foreach ($file in $docFiles) {
+              $content = [IO.File]::ReadAllText($file.FullName)
+              foreach ($match in [regex]::Matches(
+                  $content, '\]\((?!https?://|mailto:|#)([^)]+)\)')) {
+                $raw = $match.Groups[1].Value
+                $pathPart = ($raw -split '#', 2)[0].Trim('<', '>')
+                if (-not $pathPart -or $pathPart -match '^\{\{') { continue }
+                $decoded = [uri]::UnescapeDataString($pathPart)
+                $candidate = if ([IO.Path]::IsPathRooted($decoded)) {
+                  $decoded
+                } else {
+                  Join-Path $file.DirectoryName $decoded
+                }
+                if (-not (Test-Path -LiteralPath $candidate)) {
+                  $line = 1 + ([regex]::Matches(
+                    $content.Substring(0, $match.Index), [string][char]10
+                  )).Count
+                  $brokenLinks.Add(
+                    ("{0}:{1}: {2}" -f $file.FullName, $line, $raw)
+                  )
+                }
+              }
+            }
+            if ($brokenLinks.Count -gt 0) {
+              throw ("Broken local Markdown links:" + [Environment]::NewLine +
+                ($brokenLinks -join [Environment]::NewLine))
+            }
+            Write-Host "Generator and user-facing link smoke test passed."
+          } finally {
+            if (Test-Path -LiteralPath $projectPath -PathType Container) {
+              $verified = [IO.Path]::GetFullPath($projectPath)
+              if (-not $verified.StartsWith(
+                  $projectsPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+                  (Split-Path -Leaf $verified) -ne $projectName) {
+                throw "Refusing unsafe CI cleanup: $verified"
+              }
+              Remove-Item -LiteralPath $verified -Recurse -Force
+            }
+          }
+
+      - name: Check PHU_YEN_MOCK fail-closed safety
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $project = Resolve-Path "projects/PHU_YEN_MOCK"
+          $contract = Get-Content -Raw -LiteralPath (
+            Join-Path $project "MOCK_CONTRACT.json"
+          ) | ConvertFrom-Json
+          if ($contract.project_id -ne "PHU_YEN_MOCK" -or
+              -not $contract.non_operational -or
+              -not $contract.map_use_prohibited -or
+              $contract.knowledge_integration_eligible -or
+              $contract.external_reference_reuse_eligible) {
+            throw "PHU_YEN_MOCK contract is not fail-closed."
+          }
+
+          $bats = Get-ChildItem -LiteralPath $project -Recurse -File -Filter "*.bat"
+          if ($bats.Count -ne 1 -or $bats[0].Name -ne "00_CHAY_MOCK_AN_TOAN.bat") {
+            throw "PHU_YEN_MOCK must expose exactly one safe BAT."
+          }
+          $orchestrator = [IO.File]::ReadAllText(
+            (Join-Path $project "_NOI_BO\run_mock_workflow.ps1")
+          )
+          if (-not $orchestrator.Contains(
+              '$env:RK_PHU_YEN_MOCK_SAFE_RUN = ''orchestrated-v1''') -or
+              -not $orchestrator.Contains(
+              '$env:RK_PHU_YEN_MOCK_SAFE_RUN = $previousMockToken')) {
+            throw "PHU_YEN_MOCK orchestrator token guard is incomplete."
+          }
+          if (-not $orchestrator.Contains('mock_workflow.lock') -or
+              -not $orchestrator.Contains('[IO.FileShare]::None') -or
+              -not $orchestrator.Contains('concurrent writes are blocked')) {
+            throw "PHU_YEN_MOCK concurrent-run lock is incomplete."
+          }
+          if ($orchestrator.Contains('ensure_mock_pca_reference_compat') -or
+              (Test-Path -LiteralPath (Join-Path $project (
+              '_NOI_BO\pipeline\ensure_mock_pca_reference_compat.py'))) {
+            throw "Obsolete PCA reference rewriter must not be present."
+          }
+          foreach ($runnerName in @(
+              "run_interpolation_workflow.ps1", "run_sensitivity_workflow.ps1")) {
+            $runner = [IO.File]::ReadAllText(
+              (Join-Path $project "_NOI_BO\$runnerName")
+            )
+            if (-not $runner.Contains(
+                "RK_PHU_YEN_MOCK_SAFE_RUN -ne 'orchestrated-v1'")) {
+              throw "Missing direct-run guard: $runnerName"
+            }
+          }
+
+          $blocker = Join-Path $project (
+            "_NOI_BO\pipeline\build_positive_feature_library.py"
+          )
+          $previousErrorAction = $ErrorActionPreference
+          $ErrorActionPreference = "Continue"
+          $blockerOutput = & python $blocker --project-dir $project 2>&1
+          $blockerExit = $LASTEXITCODE
+          $ErrorActionPreference = $previousErrorAction
+          if ($blockerExit -ne 2 -or
+              (($blockerOutput | Out-String) -notmatch "\[BLOCKED\]")) {
+            throw "Synthetic-reference blocker did not fail closed."
+          }
+
+          $runtimeManifest = Join-Path $project "MOCK_RUN_MANIFEST.json"
+          $runtimeGate = Join-Path $project (
+            "02_NOI_SUY_BAN_DO\02_KET_QUA\" +
+            "MOCK_SYNTHETIC_NOT_FOR_USE\MOCK_QA_GATE.json"
+          )
+          if ((Test-Path -LiteralPath $runtimeManifest) -and
+              (Test-Path -LiteralPath $runtimeGate)) {
+            python (
+              Join-Path $project "_NOI_BO\pipeline\tests\mock_safety_smoke_test.py"
+            )
+            if ($LASTEXITCODE -ne 0) {
+              throw "PHU_YEN_MOCK runtime safety smoke test failed."
+            }
+          } else {
+            Write-Host "Runtime mock artifacts are intentionally absent in CI; static fail-closed gates passed."
+          }
+
+      - name: Parse shared R engine
+        shell: pwsh
+        run: |
+          Rscript -e "roots <- c('_UNG_DUNG/engine/scripts','_UNG_DUNG/project_template/_NOI_BO/pipeline','projects/AKS_2026/_NOI_BO/pipeline','projects/PHU_YEN_MOCK/_NOI_BO/pipeline'); files <- c(unlist(lapply(roots, list.files, pattern='\\.R$', full.names=TRUE)), '_UNG_DUNG/engine/rk_evaluation/evaluation.R', '_UNG_DUNG/engine/config/evaluation_profiles.R'); invisible(lapply(files[file.exists(files)], parse))"
+
+      - name: Check lightweight dependency profiles
+        shell: pwsh
+        run: |
+          Rscript _UNG_DUNG/engine/scripts/check_dependencies.R --profile sampling_design,tidy_io --output _UNG_DUNG/runtime/dependency_check_ci.json
+
+      - name: Run shared transformation smoke test
+        shell: pwsh
+        run: |
+          Rscript _UNG_DUNG/engine/scripts/transform_smoke_test.R
+
+      - name: Run actual-sample, PCA and sensitivity tests
         shell: pwsh
         run: |
           Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_actual_qa.R
           Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_outside_covariate_dissimilarity.R
           Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_sensitivity_comparison.R
+          Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_detect_pc_files.R
+          Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_pca_provenance_optional_raw.R
+          Rscript projects/AKS_2026/_NOI_BO/pipeline/tests/test_pca_support_provenance_v2.R
 
-      - name: Run agent smoke test
+      - name: Run sampling and sugarcane-transfer Python tests
         shell: pwsh
         run: |
-          Rscript scripts/agent_smoke_test.R
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/test_configure_project_crs.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/design_covariate_provenance_gate_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/soil_design_lineage_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/soil_type_lineage_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/soil_predictor_semantics_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/pca_support_extent_and_launcher_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/test_candidate_population.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/test_true_clhs_backend.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/test_minimum_spacing_gate.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/sugarcane_temporal_gate_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/sugarcane_transfer_gate_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/reference_train_only_integration_smoke_test.py
 
-      - name: Run agent loop dry-run
+      - name: Run safe AKS knowledge gates
         shell: pwsh
         run: |
-          Rscript scripts/agent_loop.R --target pH_H2O --max_iterations 1 --dry_run true
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/positive_reference_atomic_gate_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/positive_feature_knowledge_ingest_smoke_test.py
 
-      - name: Run RAG metadata smoke test
+      - name: Run curated RAG metadata smoke test
         shell: pwsh
         run: |
-          Rscript scripts/rag_validate_metadata.R agent/responses/rag_smoke_test_ci.json
+          Rscript _UNG_DUNG/engine/scripts/rag_validate_metadata.R _UNG_DUNG/runtime/rag_smoke_test_ci.json
 
   geospatial-smoke:
     if: github.event_name == 'workflow_dispatch' && inputs.run_geospatial_smoke == 'true'
@@ -89,23 +317,14 @@ jobs:
       - name: Check core dependency profile
         shell: pwsh
         run: |
-          Rscript scripts/check_dependencies.R --profile core --output agent/responses/dependency_check_core_ci.json
+          Rscript _UNG_DUNG/engine/scripts/check_dependencies.R --profile core --output _UNG_DUNG/runtime/dependency_check_core_ci.json
 
       - name: Run scientific nested-CV smoke test
         shell: pwsh
         run: |
-          Rscript scripts/scientific_validation_smoke_test.R
+          Rscript _UNG_DUNG/engine/scripts/scientific_validation_smoke_test.R
 
       - name: Run synthetic full-pipeline smoke test
         shell: pwsh
         run: |
-          Rscript scripts/full_pipeline_smoke_test.R
-
-      - name: Run raster preflight if data is present
-        shell: pwsh
-        run: |
-          if (Test-Path input/raster) {
-            Rscript scripts/validate_raster_schema.R --output agent/responses/raster_schema_check_ci.json
-          } else {
-            Write-Host "input/raster is not present in CI checkout; geospatial package install and core dependency check completed."
-          }
+          Rscript _UNG_DUNG/engine/scripts/full_pipeline_smoke_test.R

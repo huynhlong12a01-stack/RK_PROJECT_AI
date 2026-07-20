@@ -41,3 +41,4 @@ reference_domain_sample_limit: 2000
 reference_minimum_row_fraction: 0.80
 reference_minimum_predictor_fraction: 0.90
 reference_max_fraction_of_local_training: 0.25
+crs_mode: auto

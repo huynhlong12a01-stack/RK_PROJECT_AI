@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "project_id": "PHU_YEN_MOCK",
+  "non_operational": true,
+  "map_use_prohibited": true,
+  "validated_sugarcane_map": false,
+  "validated_lab_results": false,
+  "random_seed": 20260715,
+  "sources": {
+    "roi_search": {"type": "public_historical_boundary"},
+    "soil_type": {"type": "user_provided_national_geojson"},
+    "roi_field_area": {"type": "synthetic_fixture", "field_verified": false},
+    "sugarcane_labels": {
+      "type": "synthetic_fixture",
+      "field_verified": false,
+      "production_training_eligible": false,
+      "validation_eligible": false
+    },
+    "laboratory_results": {"type": "synthetic_fixture", "laboratory_measured": false}
+  },
+  "runtime": {
+    "computational_grid_m": 30,
+    "covariate_start_date": "2025-01-01",
+    "covariate_end_date_exclusive": "2026-01-01",
+    "stage0_approval_meaning": "software geometry gate only; not sugarcane validation",
+    "stage1_status": "PENDING",
+    "stage2_status": "PENDING"
+  },
+  "required_label_for_all_outputs": "MOCK_SYNTHETIC_NOT_FOR_USE"
+}

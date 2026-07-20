@@ -1,0 +1,6 @@
+layer,file,type,resampling
+PC1,PC1.tif,continuous,bilinear
+PC2,PC2.tif,continuous,bilinear
+PC3,PC3.tif,continuous,bilinear
+PC4,PC4.tif,continuous,bilinear
+PC5,PC5.tif,continuous,bilinear

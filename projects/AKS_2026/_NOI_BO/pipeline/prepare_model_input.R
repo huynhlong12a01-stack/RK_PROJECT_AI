@@ -232,9 +232,10 @@ if (length(missing_filled_metadata)) {
   )
 }
 if (!length(filled)) {
-  stop(
-    "Chua co ket qua lab trong sample_actual.csv. QA metadata and sensitivity hooks are ready; ",
-    "add at least one numeric indicator and run again."
+  cat(
+    "WAITING_LAB: predictor, PCA, Soil Type, point QA and model-input hooks are ready; ",
+    "no interpolation map was created. Add numeric lab results and run again.\n",
+    sep = ""
   )
 }
 cat(

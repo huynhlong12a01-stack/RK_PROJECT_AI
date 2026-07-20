@@ -1,11 +1,11 @@
 {
   "schema_version": "curated_index_manifest_v1",
-  "generated_at_utc": "2026-07-14T03:58:45Z",
+  "generated_at_utc": "2026-07-20T08:37:18Z",
   "purpose": "Auditable lexical retrieval over curated bibliographic metadata and evidence cards; no copyrighted full text.",
   "exclusions": ["sources with quality_level=exclude", "evidence-card templates", "paper full text"],
   "output": {
     "chunks_file": "knowledge/index/curated/chunks.jsonl",
-    "sha256": "4bbaaef440587a5b1a2b6a868285a8af622637c6c7b70c148f390ee3efc7332c",
+    "sha256": "dd2f1156ac9931ecbbdd981d5fac2f8a9542e68a28768b885d98192275d8c46d",
     "hash_available": true
   },
   "counts": {
@@ -22,7 +22,7 @@
     },
     {
       "path": "knowledge/metadata/topic_taxonomy.json",
-      "sha256": "3666b1612151c16184892b413275acd4380b78083e7c1b499fb4681f1dd5c6cb"
+      "sha256": "987dc1494bb588519ba85fbcdc6f41b50609f361ddd9f13214fe36bbbea09176"
     },
     {
       "path": "knowledge/notes/evidence_cards/covariate_native_resolution_001.json",
@@ -54,7 +54,7 @@
     },
     {
       "path": "knowledge/notes/evidence_cards/map_support_resolution_001.json",
-      "sha256": "4894e83583da676a3214c8b7fc3c9704df65c06dc3e670bc1247e2463618c83f"
+      "sha256": "3e1985616dc3f60221d0d9cddd5368aed7f934d910d0cfe6a07823b4733bf391"
     },
     {
       "path": "knowledge/notes/evidence_cards/metrics_multi_metric_assessment_001.json",

@@ -21,7 +21,7 @@ from sampling_diagnostics import plan_diagnostics
 
 ROOT = Path(__file__).resolve().parents[4]
 PROJECT = ROOT / "projects" / "AKS_2026"
-ROI_FILE = PROJECT / "01_THIET_KE_LAY_MAU" / "01_DAU_VAO" / "roi.geojson"
+ROI_FILE = PROJECT / "00_XAC_LAP_VUNG_MIA" / "01_DAU_VAO" / "roi_field_area.geojson"
 PREDICTOR_DIR = PROJECT / "_NOI_BO" / "work" / "design"
 SOIL_GROUP_FILE = PROJECT / "_NOI_BO" / "work" / "design" / "Soil_Group_Code.tif"
 OUTPUT_DIR = PROJECT / "_NOI_BO" / "work" / "design"
@@ -55,7 +55,10 @@ def allocate_quotas(groups, n_total):
     return dict(zip(values.astype(int), quota.astype(int)))
 
 
-def select_lhs_for_group(features, coords, candidate_ids, n, selected_coords, rng):
+def select_lhs_for_group(
+    features, coords, candidate_ids, n, selected_coords, rng,
+    minimum_spacing_m=MIN_SPACING_M,
+):
     if n <= 0 or len(candidate_ids) == 0:
         return []
     x = features[candidate_ids]
@@ -82,7 +85,7 @@ def select_lhs_for_group(features, coords, candidate_ids, n, selected_coords, rn
             point = coords[global_idx]
             if all_selected:
                 dist = np.linalg.norm(np.asarray(all_selected) - point, axis=1)
-                if np.min(dist) < MIN_SPACING_M:
+                if np.min(dist) < minimum_spacing_m:
                     continue
             accepted = global_idx
             break
@@ -96,7 +99,7 @@ def select_lhs_for_group(features, coords, candidate_ids, n, selected_coords, rn
         for idx in remainder:
             point = coords[int(idx)]
             if all_selected:
-                if np.min(np.linalg.norm(np.asarray(all_selected) - point, axis=1)) < MIN_SPACING_M:
+                if np.min(np.linalg.norm(np.asarray(all_selected) - point, axis=1)) < minimum_spacing_m:
                     continue
             chosen.append(int(idx))
             all_selected.append(point)

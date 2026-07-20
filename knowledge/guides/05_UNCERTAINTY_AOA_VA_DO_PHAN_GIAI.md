@@ -24,6 +24,6 @@ Nguồn: schmidinger_heuvelink_2023_uncertainty, DOI [10.1016/j.geoderma.2023.11
 
 ## Support và lưới
 
-Mẫu composite 0–30 cm, điểm GPS, raster covariate và cell dự báo có support khác nhau. Lưới 10 m là nơi tính toán/xuất kết quả; không có nghĩa giá trị đất được quan trắc ở mỗi ô 10 m hoặc dữ liệu khí hậu có chi tiết 10 m.
+Một kết quả trung bình cho mỗi mẫu, điểm GPS, raster covariate và cell dự báo có support khác nhau. Lưới tính toán/xuất kết quả không có nghĩa giá trị đất được quan trắc tại từng ô hoặc mọi covariate có cùng độ chi tiết.
 
-Report phải ghi depth/support của mẫu, kích thước lưới xuất, native resolution từng covariate, intended use scale, vùng AOA/extrapolation, uncertainty type và cách kiểm định.
+Report phải ghi cách đại diện một kết quả trung bình cho mỗi mẫu, kích thước lưới xuất, native resolution từng covariate, intended use scale, vùng AOA/extrapolation, uncertainty type và cách kiểm định.

@@ -77,12 +77,12 @@ Strong claim cần ít nhất hai nguồn và tối thiểu một nguồn core. 
 
 Chạy:
 
-    .\run_rag_smoke_test.ps1
-    .\run_rag_build_curated_index.ps1
-    .\run_rag_query.ps1 -Query "spatial cross validation map accuracy" -TopK 8
-    .\run_rag_query.ps1 -Query "kiểm định chéo không gian độ chính xác bản đồ" -TopK 8
-    .\run_rag_query.ps1 -Query "phương pháp lab đơn vị extractant" -TopK 8
-    .\run_rag_query.ps1 -Query "22 điểm ngoài ROI vùng áp dụng" -TopK 8
+    .\_UNG_DUNG\tools\run_rag_smoke_test.ps1
+    .\_UNG_DUNG\tools\run_rag_build_curated_index.ps1
+    .\_UNG_DUNG\tools\run_rag_query.ps1 -Query "spatial cross validation map accuracy" -TopK 8
+    .\_UNG_DUNG\tools\run_rag_query.ps1 -Query "kiểm định chéo không gian độ chính xác bản đồ" -TopK 8
+    .\_UNG_DUNG\tools\run_rag_query.ps1 -Query "phương pháp lab đơn vị extractant" -TopK 8
+    .\_UNG_DUNG\tools\run_rag_query.ps1 -Query "22 điểm ngoài ROI vùng áp dụng" -TopK 8
 
 Không hoàn tất nếu có unknown source id, duplicate DOI/doc_id, tag ngoài taxonomy, URL không hợp lệ, card mạnh thiếu nguồn, index rỗng hoặc truy vấn song ngữ không trả đúng chủ đề.
 

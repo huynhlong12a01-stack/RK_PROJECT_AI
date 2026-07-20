@@ -22,6 +22,7 @@ Tài liệu này dành cho Codex/AI agent khi vận hành một dự án trong R
 Danh sách project nằm trong projects. Với mỗi project, đọc:
 
     projects/TEN_DU_AN/README.md
+    projects/TEN_DU_AN/THONG_SO_DU_AN.yml
     projects/TEN_DU_AN/00_XAC_LAP_VUNG_MIA/HUONG_DAN.md
     projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/HUONG_DAN.md
     projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/HUONG_DAN.md
@@ -52,7 +53,7 @@ Nội suy:
 
     powershell -ExecutionPolicy Bypass -File projects/TEN_DU_AN/RUN.ps1 interpolate
 
-Các BAT người dùng nhấp chỉ gọi các action trên. Không ưu tiên run_rk.bat hoặc output/agent_runs cho luồng project mới.
+Các BAT người dùng nhấp chỉ gọi các action trên; đầu vào và kết quả luôn nằm trong đúng thư mục của từng dự án.
 
 ## 4. Bước 0 và Workflow 1
 
@@ -60,12 +61,12 @@ Bước 0 nhận `roi_field_area.geojson`, hoặc `roi_search.geojson` cùng nh�
 
 Kiểm tra:
 
+    projects/TEN_DU_AN/THONG_SO_DU_AN.yml
     projects/TEN_DU_AN/00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_field_area.geojson
-    projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/01_DAU_VAO/roi.geojson
     projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/01_DAU_VAO/soil_type.geojson
     projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/01_DAU_VAO/sampling.yml
 
-ROI bắt buộc. Soil Type tùy chọn. sampling.yml phải có CRS, thời gian covariates và cấu hình lấy mẫu hợp lệ.
+`THONG_SO_DU_AN.yml` là nguồn duy nhất cho CRS, GEE, `resolution_m`, `covariate_support_buffer_m` và ngày covariates. ROI bắt buộc; Soil Type tùy chọn; `sampling.yml` chứa số mẫu, spacing và tham số cLHS. Không coi `THONG_SO_DU_AN.yml` là tệp duy nhất người dùng được sửa.
 
 Sau run, đọc:
 
@@ -79,11 +80,12 @@ Kiểm tra REDUCED là tập con FULL, mọi điểm trong ROI, mã/tọa độ 
 
 ## 5. Workflow 2
 
-Đầu vào duy nhất người dùng chỉnh:
+Đầu vào kết quả mẫu người dùng chỉnh:
 
     projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/01_DAU_VAO/sample_actual.csv
+    projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/01_DAU_VAO/indicator_metadata.yml
 
-Ba cột bắt buộc: code, lat, lon. Mỗi target phải có số liệu numeric và metadata lab rõ trước khi phát hành.
+Kết quả lab chỉ nằm trong `sample_actual.csv`; `indicator_metadata.yml` chỉ chứa định nghĩa phương pháp/đơn vị. Ba cột bắt buộc là code, lat, lon. Mỗi target phải có số liệu numeric và metadata lab rõ trước khi phát hành.
 
 Preflight cần báo:
 
@@ -118,12 +120,12 @@ Với 22 điểm ngoài ROI, báo target population/support, covariate AOA/dissi
 
 Kiểm tra knowledge:
 
-    .\run_rag_smoke_test.ps1
-    .\run_rag_build_curated_index.ps1
+    .\_UNG_DUNG\tools\run_rag_smoke_test.ps1
+    .\_UNG_DUNG\tools\run_rag_build_curated_index.ps1
 
 Tra cứu:
 
-    .\run_rag_query.ps1 -Query "điểm ngoài ROI và area of applicability" -TopK 8
+    .\_UNG_DUNG\tools\run_rag_query.ps1 -Query "điểm ngoài ROI và area of applicability" -TopK 8
 
 Chỉ dùng claim có doc_id/DOI/URL và đúng phạm vi. Không suy citation.
 

@@ -2,6 +2,9 @@ suppressPackageStartupMessages({
   library(terra)
   library(readr)
   library(jsonlite)
+  library(yaml)
+  library(digest)
+  library(sf)
 })
 
 base <- "projects/AKS_2026"
@@ -12,93 +15,136 @@ design_dir <- file.path(internal, "work/design")
 current_dir <- file.path(internal, "work/interpolation")
 qa_dir <- file.path(current_dir, "qa")
 sidecar_file <- file.path(qa_dir, "pca_current_provenance.json")
-tolerance <- 1e-3
+cfg <- yaml::read_yaml(file.path(internal, "config/project.yml"))
+source(file.path(internal, "pipeline/pca_support_provenance_utils.R"))
 
-if (!requireNamespace("digest", quietly = TRUE)) stop("Package 'digest' is required.")
-ref <- jsonlite::read_json(ref_file, simplifyVector = TRUE)
-ref_hash <- as.character(ref$reference_hash)
-if (length(ref_hash) != 1L || !grepl("^[0-9a-f]{64}$", ref_hash)) {
-  stop("PCA reference_hash is missing or is not SHA-256.")
-}
-if (!isTRUE(ref$reference_frozen)) stop("PCA reference is not frozen.")
-if (is.null(ref$reference_version) || !nzchar(as.character(ref$reference_version))) {
-  stop("PCA reference_version is missing.")
-}
-if (!file.exists(point_file)) stop("Run actual-sample preflight first.")
-
-points <- as.data.frame(readr::read_csv(point_file, show_col_types = FALSE, progress = FALSE))
-pts <- terra::vect(points, geom = c("lon", "lat"), crs = "EPSG:4326")
-pts <- terra::project(pts, "EPSG:32649")
-
-extract_files <- function(files) {
-  if (!all(file.exists(files))) return(NULL)
-  values <- lapply(files, function(path) terra::extract(rast(path)[[1]], pts)[, 2])
-  as.matrix(as.data.frame(values, stringsAsFactors = FALSE))
-}
-
-current_files <- file.path(current_dir, paste0("PC", 1:5, ".tif"))
-design_files <- file.path(design_dir, paste0("PC", 1:5, ".tif"))
-raw_files <- file.path(current_dir, paste0(as.character(ref$feature_order), ".tif"))
-current <- extract_files(current_files)
-design <- extract_files(design_files)
-raw <- extract_files(raw_files)
-if (is.null(current) || is.null(design) || is.null(raw)) stop("PCA provenance verification inputs are incomplete.")
-
-raw_complete <- stats::complete.cases(raw)
-design_complete <- stats::complete.cases(design)
-current_complete <- stats::complete.cases(current)
-z <- sweep(raw, 2, as.numeric(ref$scaler_mean), "-")
-z <- sweep(z, 2, as.numeric(ref$scaler_scale), "/")
-raw_pc <- z %*% t(as.matrix(ref$pca_components))
-
-expected <- matrix(NA_real_, nrow = nrow(points), ncol = 5L)
-verification_source <- rep("unavailable", nrow(points))
-expected[design_complete, ] <- design[design_complete, , drop = FALSE]
-verification_source[design_complete] <- "workflow1_frozen_pca_raster"
-use_raw <- !design_complete & raw_complete
-expected[use_raw, ] <- raw_pc[use_raw, , drop = FALSE]
-verification_source[use_raw] <- "raw_covariates_recomputed_with_frozen_reference"
-expected_complete <- stats::complete.cases(expected)
-if (any(!current_complete)) stop("Current interpolation PC rasters are incomplete at ", sum(!current_complete), " sample(s).")
-if (any(!expected_complete)) stop("Cannot independently verify PCA provenance at ", sum(!expected_complete), " sample(s).")
-
-abs_error <- abs(current - expected)
-max_error_by_pc <- apply(abs_error, 2, max, na.rm = TRUE)
-if (any(max_error_by_pc > tolerance)) {
-  stop(
-    "Current PCA rasters do not match the frozen reference; max errors: ",
-    paste(signif(max_error_by_pc, 6), collapse = ", ")
+# Retained as a pure compatibility helper for the focused lazy-raw unit test.
+# The active no-support route below uses the stronger exact whole-file copy proof.
+resolve_expected_pca <- function(design, n_points, n_components, ref, raw_loader) {
+  if (is.null(design)) design <- matrix(NA_real_, nrow = n_points, ncol = n_components)
+  design_complete <- stats::complete.cases(design)
+  raw_complete <- rep(FALSE, n_points)
+  raw_pc <- matrix(NA_real_, nrow = n_points, ncol = n_components)
+  raw_loaded <- FALSE
+  raw_available <- FALSE
+  if (any(!design_complete)) {
+    raw_loaded <- TRUE
+    raw <- raw_loader()
+    raw_available <- !is.null(raw)
+    if (raw_available) {
+      raw_complete <- stats::complete.cases(raw)
+      z <- sweep(raw, 2, as.numeric(ref$scaler_mean), "-")
+      z <- sweep(z, 2, as.numeric(ref$scaler_scale), "/")
+      raw_pc <- z %*% t(as.matrix(ref$pca_components))
+    }
+  }
+  expected <- matrix(NA_real_, nrow = n_points, ncol = n_components)
+  verification_source <- rep("unavailable", n_points)
+  expected[design_complete, ] <- design[design_complete, , drop = FALSE]
+  verification_source[design_complete] <- "workflow1_frozen_pca_raster"
+  use_raw <- !design_complete & raw_complete
+  expected[use_raw, ] <- raw_pc[use_raw, , drop = FALSE]
+  verification_source[use_raw] <- "raw_covariates_recomputed_with_frozen_reference"
+  list(
+    expected = expected, verification_source = verification_source,
+    design_complete = design_complete, use_raw = use_raw,
+    raw_loaded = raw_loaded, raw_available = raw_available
   )
 }
 
-pc_hashes <- setNames(
-  vapply(current_files, digest::digest, character(1), file = TRUE, algo = "sha256"),
-  basename(current_files)
+features <- c("CHIRPS", "DEM", "NDVI", "Slope", "TWI")
+pc_labels <- paste0("PC", seq_along(features))
+pc_file_labels <- paste0(pc_labels, ".tif")
+current_files <- file.path(current_dir, pc_file_labels)
+design_files <- file.path(design_dir, pc_file_labels)
+design_raw_files <- file.path(design_dir, paste0(features, ".tif"))
+design_summary_file <- file.path(design_dir, "qa/pca_summary.json")
+design_raw_provenance_file <- file.path(design_dir, "qa/raw_covariate_provenance.json")
+roi_file <- cfg$source$roi_file
+required <- c(
+  ref_file, point_file, current_files, design_files, design_raw_files,
+  design_summary_file, design_raw_provenance_file, roi_file
 )
+missing <- required[!file.exists(required)]
+if (length(missing)) stop("Cannot certify Workflow 1 PCA copy; missing: ", paste(missing, collapse = ", "))
+
+ref <- jsonlite::read_json(ref_file, simplifyVector = TRUE)
+if (!identical(as.character(ref$feature_order), features)) {
+  stop("Frozen PCA feature order does not match the five Workflow 1 covariates.")
+}
+workflow1 <- pca_support_validate_workflow1(
+  design_summary_file, design_files, design_raw_files,
+  design_raw_provenance_file, features, ref, ref_file, cfg, roi_file
+)
+if (!isTRUE(workflow1$valid)) {
+  stop("Workflow 1 lineage is not trustworthy: ", paste(workflow1$reasons, collapse = "; "))
+}
+source_hashes <- unlist(workflow1$design_pc_sha256, use.names = TRUE)
+current_hashes_by_file <- pca_support_named_hashes(current_files, pc_file_labels)
+current_hashes_by_component <- setNames(unname(current_hashes_by_file), pc_labels)
+if (!pca_support_exact_hash_map(source_hashes, current_hashes_by_component, pc_labels)) {
+  stop("Current interpolation PC rasters are not exact byte-for-byte copies of Workflow 1 PCs.")
+}
+
+points <- as.data.frame(readr::read_csv(point_file, show_col_types = FALSE, progress = FALSE))
+coordinate_hash <- pca_support_coordinate_sha256(points)
+pca_output_grid <- pca_support_file_grid(current_files[[1]])
+ref_hash <- tolower(as.character(ref$reference_hash))
+if (!isTRUE(ref$reference_frozen) || !pca_support_is_sha256(ref_hash)) {
+  stop("PCA reference is not a valid frozen reference.")
+}
+
+dir.create(qa_dir, recursive = TRUE, showWarnings = FALSE)
 point_verification <- data.frame(
   code = points$code,
-  verification_source = verification_source,
-  maximum_absolute_pc_error = apply(abs_error, 1, max, na.rm = TRUE),
+  verification_source = "exact_workflow1_file_copy",
+  maximum_absolute_pc_error = 0,
   stringsAsFactors = FALSE
 )
-dir.create(qa_dir, recursive = TRUE, showWarnings = FALSE)
-readr::write_csv(point_verification, file.path(qa_dir, "pca_current_provenance_points.csv"), na = "")
+readr::write_csv(
+  point_verification,
+  file.path(qa_dir, "pca_current_provenance_points.csv"),
+  na = ""
+)
 jsonlite::write_json(
   list(
-    project_id = "AKS_2026",
+    schema_version = "2.0.0",
+    provenance_type = "interpolation_pca_lineage",
+    provenance_mode = "verified_workflow1_copy",
+    project_id = as.character(cfg$project_id),
+    verification_status = "verified_full_hash_chain",
     pca_reference_hash = ref_hash,
     reference_frozen = TRUE,
     reference_version = as.character(ref$reference_version),
-    verification_status = "verified_against_workflow1_or_recomputed_raw_covariates",
-    verification_tolerance = tolerance,
+    reference_file_sha256 = pca_support_sha256(ref_file),
+    sample_coordinate_sha256 = coordinate_hash,
+    source_workflow1_pca_summary_sha256 = workflow1$design_summary_sha256,
+    source_workflow1_raw_provenance_sha256 = workflow1$design_raw_provenance_sha256,
+    source_workflow1_pc_sha256 = workflow1$design_pc_sha256,
+    source_workflow1_raw_covariate_sha256 = workflow1$design_raw_sha256,
+    source_workflow1_identity_sha256 = workflow1$source_identity_sha256,
+    source_workflow1_grid_sha256 = workflow1$output_grid_sha256,
+    pca_output_grid = pca_output_grid,
+    pca_output_grid_sha256 = pca_support_json_sha256(pca_output_grid),
     n_points = nrow(points),
-    n_verified_against_workflow1 = sum(design_complete),
-    n_verified_by_raw_recomputation = sum(use_raw),
-    n_verified_total = sum(expected_complete),
-    max_absolute_error_by_pc = as.list(setNames(max_error_by_pc, paste0("PC", 1:5))),
-    pc_file_sha256 = as.list(pc_hashes),
+    n_verified_total = nrow(points),
+    pc_file_sha256 = as.list(current_hashes_by_file),
     generated_utc = format(Sys.time(), tz = "UTC", usetz = TRUE)
   ),
-  sidecar_file, pretty = TRUE, auto_unbox = TRUE
+  sidecar_file, pretty = TRUE, auto_unbox = TRUE,
+  digits = 17, null = "null"
 )
-cat("Current PCA provenance verified for ", nrow(points), " samples.\n", sep = "")
+
+# Route-specific QA from an older support rebuild must not masquerade as active.
+unlink(
+  file.path(
+    qa_dir,
+    c(
+      "pca_support_summary.json",
+      "pca_support_point_coverage.csv",
+      "gee_support_download_summary.json"
+    )
+  ),
+  force = TRUE
+)
+cat("Current PCA provenance verified as an exact schema-v2 Workflow 1 copy for ", nrow(points), " samples.\n", sep = "")

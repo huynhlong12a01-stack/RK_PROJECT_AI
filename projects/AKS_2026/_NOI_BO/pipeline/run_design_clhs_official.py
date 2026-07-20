@@ -29,7 +29,7 @@ def setting(name, default, cast):
     if not SETTINGS_FILE.exists():
         return default
     text = SETTINGS_FILE.read_text(encoding="utf-8")
-    match = re.search(rf"(?m)^\s*{re.escape(name)}\s*:\s*([^#\r\n]+)", text)
+    match = re.search(rf"(?m)^[ \t]*{re.escape(name)}[ \t]*:[ \t]*([^#\r\n]+)", text)
     if not match:
         return default
     raw = match.group(1).strip().strip('"\'')
@@ -46,7 +46,7 @@ project_id = setting("project_id", "AKS_2026", str)
 spec = importlib.util.spec_from_file_location("sampling_engine", ENGINE_FILE)
 engine = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(engine)
-engine.ROI_FILE = INPUT_DIR / "roi.geojson"
+engine.ROI_FILE = PROJECT / "00_XAC_LAP_VUNG_MIA" / "01_DAU_VAO" / "roi_field_area.geojson"
 engine.PREDICTOR_DIR = WORK_DIR
 engine.SOIL_GROUP_FILE = WORK_DIR / "Soil_Group_Code.tif"
 engine.OUTPUT_DIR = WORK_DIR
@@ -82,11 +82,25 @@ engine.CLHS_WEIGHTS = {
 }
 
 soil_summary_file = QA_DIR / "soil_group_summary.json"
+soil_summary = {}
 if soil_summary_file.exists():
     soil_summary = json.loads(soil_summary_file.read_text(encoding="utf-8"))
     engine.SOIL_LABELS = {
         int(k): v for k, v in soil_summary.get("code_labels", {"1": "All"}).items()
     }
+soil_lineage = {
+    key: soil_summary.get(key)
+    for key in (
+        "schema_version", "mode", "soil_input_present", "soil_source_sha256",
+        "source_field", "encoding", "code_map_sha256",
+        "soil_group_raster_sha256", "unmapped_policy", "whole_domain_overlap_qa",
+        "source_registry_metadata",
+    )
+}
+soil_lineage["soil_group_summary_sha256"] = (
+    hashlib.sha256(soil_summary_file.read_bytes()).hexdigest()
+    if soil_summary_file.exists() else None
+)
 
 required = [engine.ROI_FILE, engine.SOIL_GROUP_FILE] + [
     engine.PREDICTOR_DIR / f"PC{i}.tif" for i in range(1, 6)
@@ -226,6 +240,8 @@ def plan_qa(plan, frame, output_file):
         "reduced_is_subset_of_full": True,
         "sampling_constraints": {
             "minimum_spacing_target_m": engine.MIN_SPACING_M,
+            "minimum_spacing_target_met": engine_summary.get("minimum_spacing_target_met"),
+            "core_spacing": engine_summary.get("core_spacing"),
             "inner_buffer_m": engine.INNER_BUFFER_M,
             "random_seed": engine.SEED,
         },
@@ -239,6 +255,18 @@ def plan_qa(plan, frame, output_file):
                 "reference_version",
                 "reference_hash_algorithm",
                 "reference_hash",
+                "reference_file_sha256",
+                "pca_input_lineage_verified",
+                "raw_provenance_sha256",
+                "raw_covariate_sha256",
+                "pca_raster_sha256",
+                "pca_fit_random_seed",
+                "pca_fit_sample_requested",
+                "pca_fit_sample_returned",
+                "pca_fit_sample_complete",
+                "pca_fit_r_version",
+                "pca_fit_terra_version",
+                "reproducibility_scope",
             )
         },
         "covariate_provenance": {
@@ -248,6 +276,7 @@ def plan_qa(plan, frame, output_file):
             "native_or_effective_scale_warning": provenance["interpretation_warning"],
         },
         "raw_covariate_coverage": raw_coverage.get("raw_covariates", {}),
+        "soil_type_lineage": soil_lineage,
         "migration": migration_note,
         "metrics": engine_summary.get("plan_metrics", {}).get(plan, {}),
         "diagnostic_disclaimer": diagnostic_disclaimer,
@@ -279,6 +308,8 @@ qa = {
     "FULL_role_counts": counts(full),
     "REDUCED_role_counts": counts(reduced),
     "minimum_spacing_m": engine.MIN_SPACING_M,
+    "minimum_spacing_target_met": engine_summary.get("minimum_spacing_target_met"),
+    "core_spacing": engine_summary.get("core_spacing"),
     "inner_buffer_m": engine.INNER_BUFFER_M,
     "random_seed": engine.SEED,
     "pca_summary_file": "../../_NOI_BO/work/design/qa/pca_summary.json",
@@ -289,6 +320,7 @@ qa = {
         "REDUCED": "sampling_QA_REDUCED.json",
     },
     "raw_covariate_coverage": raw_coverage,
+    "soil_type_lineage": soil_lineage,
     "pca_reconstruction_check": pca_reconstruction,
     "migration": migration_note,
     "engine_summary": engine_summary,

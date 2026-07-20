@@ -9,7 +9,7 @@ Trước tiên, nhấp `0_KIEM_TRA_DU_AN.bat` trong thư mục dự án. Đọc 
 - Nếu đã có ranh giới mía, file phải là `00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_field_area.geojson`.
 - Nếu chưa có, phải có cả `roi_search.geojson` và `sugarcane_labels.csv`.
 - Kiểm tra đuôi thật của file; ROI phải là polygon/multipolygon, không phải danh sách điểm.
-- `roi.geojson` trong Quy trình 1 là lớp tương thích do workflow quản lý, không phải nơi chính để dự án mới nạp ROI.
+- ROI duy nhất nằm tại 00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_field_area.geojson; nếu thiếu, quay lại Bước 0 để cung cấp hoặc phê duyệt ROI.
 
 ### Báo nhãn không đủ hai lớp
 
@@ -33,23 +33,24 @@ Trước tiên, nhấp `0_KIEM_TRA_DU_AN.bat` trong thư mục dự án. Đọc 
 
 Chạy Bước 0 trước. Không đổi tên ROI ứng viên thành ROI chính thức nếu chưa review.
 
-### Báo thiếu `sampling.yml` hoặc cấu hình không hợp lệ
+### Báo thiếu `THONG_SO_DU_AN.yml`, `sampling.yml` hoặc cấu hình không hợp lệ
 
 - Không đổi tên file.
-- Kiểm tra `crs_epsg`, `resolution_m`, `gee_project_id`, ngày bắt đầu/kết thúc.
+- Kiểm tra `crs_mode`, `crs_epsg`, `resolution_m`, `covariate_support_buffer_m`, `gee_project_id`, `sampling_start_date` và `sampling_end_date` trong `THONG_SO_DU_AN.yml`.
+- Chỉ sửa các thông số chung này tại `THONG_SO_DU_AN.yml`; `sampling.yml` chỉ dùng cho số mẫu, spacing và tham số cLHS.
 - Ngày dùng định dạng `YYYY-MM-DD` và ngày kết thúc phải sau ngày bắt đầu.
 - Dùng khoảng trắng, không dùng tab trong YAML.
 
 ### Soil Type không được nhận
 
-- File phải tên `soil_type.geojson` và nằm cùng ROI.
+- File phải tên `soil_type.geojson` và nằm tại `01_THIET_KE_LAY_MAU/01_DAU_VAO`; ROI vẫn nằm riêng ở Bước 0.
 - Cột khai báo tại `soil_group_field` phải tồn tại đúng chính tả/hoa thường.
 - Geometry phải là polygon hợp lệ và có hệ tọa độ được khai báo.
 - Nếu không có Soil Type, có thể bỏ file; workflow vẫn chạy với PC covariates.
 
 ### Không tải được Earth Engine
 
-- Xác nhận tài khoản đã đăng nhập và có quyền đối với `gee_project_id`.
+- Xác nhận tài khoản đã đăng nhập và có quyền đối với `gee_project_id` khai báo trong `THONG_SO_DU_AN.yml`.
 - Kiểm tra kết nối mạng và quota/tác vụ đang chạy trên Earth Engine.
 - Kiểm tra khoảng ngày có dữ liệu.
 - Không chạy đồng thời nhiều bản sao của cùng dự án.
@@ -57,7 +58,7 @@ Chạy Bước 0 trước. Không đổi tên ROI ứng viên thành ROI chính 
 
 ### Báo không tìm thấy Python hoặc Rscript
 
-Ứng dụng ưu tiên môi trường Python của `D:\apps\POINT_PLANNING_APP\.venv` rồi mới tìm Python hệ thống; Rscript phải có trong PATH. Đây là lỗi môi trường, không phải lỗi dữ liệu. Ghi lại toàn bộ thông báo và nhờ người quản trị cài/khôi phục môi trường trước khi tiếp tục.
+Ứng dụng chỉ dùng môi trường riêng `D:\RK_R_Project\.venv`; nếu chưa có, hãy chạy `D:\RK_R_Project\CAI_DAT_UNG_DUNG.bat`. Ứng dụng không còn tự mượn môi trường của dự án cũ; `Rscript` vẫn phải có trong `PATH`.
 
 ### Kết quả FULL/REDUCED không như mong đợi
 
@@ -72,11 +73,13 @@ Chạy Bước 0 trước. Không đổi tên ROI ứng viên thành ROI chính 
 
 ### Báo chưa có PCA từ Quy trình 1
 
-Chạy `CHAY_THIET_KE_LAY_MAU.bat` đến khi có đủ PC1–PC5 và PCA reference. Không chép PCA từ dự án khác để vượt qua kiểm tra.
+Nếu trạng thái hiển thị `raw provenance STALE/UNVERIFIED` hoặc `PCA lineage STALE/UNVERIFIED`, không chép file để vượt cổng. Chạy lại `CHAY_THIET_KE_LAY_MAU.bat` đến khi có đủ năm raw covariates, PC1–PC5, PCA reference và chuỗi hash/sidecar hợp lệ.
+
+Nếu Quy trình 1 đã được xác minh nhưng một điểm thực tế nằm ngoài mask PC, hãy chạy Quy trình 2: ứng dụng sẽ dùng raw covariates Quy trình 1 để tạo lại PCA cục bộ tại ô mẫu. Đây không phải lỗi và không cần GEE khi raw vẫn đầy đủ.
 
 ### `sample_actual.csv` có dòng nhưng `Indicators ready = 0`
 
-Đây là trạng thái bình thường khi đang chờ lab. Dán ít nhất một cột kết quả số. Để ô chưa có kết quả trống; không nhập chữ hoặc đơn vị.
+Đây là trạng thái bình thường khi đang chờ lab. Hãy chạy Quy trình 2 một lần để chuẩn bị predictor; trạng thái mong đợi là `Actual PCA: provenance VERIFIED` và `WAITING_LAB`, tiến trình thành công nhưng không có bản đồ mới. Với đường cục bộ, privacy gate báo không cần truyền dữ liệu ra ngoài; chỉ nhánh GEE dự phòng mới phải báo `VERIFIED`. Khi lab trả kết quả, dán ít nhất một cột số rồi chạy lại. Để ô chưa có kết quả trống; không nhập chữ hoặc đơn vị.
 
 ### Báo lỗi mã hoặc tọa độ
 
@@ -87,13 +90,30 @@ Chạy `CHAY_THIET_KE_LAY_MAU.bat` đến khi có đủ PC1–PC5 và PCA refere
 
 ### Điểm ngoài ROI thiếu covariates
 
-Ứng dụng sẽ cố tải vùng hỗ trợ từ Earth Engine. Nếu vẫn lỗi:
+Ứng dụng xử lý theo thứ tự:
+
+1. kiểm chứng năm raw covariates và sidecar của Quy trình 1;
+2. nếu raw còn đủ tại ô mẫu, tạo mask phân tích bằng mask PC Quy trình 1 cộng các ô chứa `sample_actual`, rồi tạo lại PCA cục bộ bằng frozen reference, không kết nối ngoài;
+3. chỉ khi raw thật sự thiếu mới tải bổ sung từ GEE bằng bounding envelope ROI cộng fixed buffer.
+
+Nếu vẫn lỗi:
 
 - kiểm tra tọa độ có đúng nơi lấy mẫu;
 - kiểm tra điểm có quá xa miền dự án hay không;
 - kiểm tra GEE và khoảng thời gian dữ liệu;
 - xem `preflight_summary.json` và các file `pca_support_*` để biết điểm nào thiếu;
 - không điền PC bằng tay và không nội suy covariates từ một dự án khác.
+
+
+### Privacy gate chặn vùng support
+
+Đây là cổng an toàn chỉ áp dụng cho nhánh GEE dự phòng và chạy **trước** kết nối GEE. Vùng support hợp lệ phải là đúng một polygon/multipolygon tạo từ bounding envelope của `ROI_field_area` cộng vùng đệm cố định; chỉ có ba thuộc tính `support_geometry_policy`, `support_buffer_m`, `contains_sample_attributes`. Đây là miền tải, không phải prediction domain.
+
+- Không thêm `code`, `lat`, `lon`, `sample_id`, `x/y` hoặc bất kỳ trường nhận dạng mẫu nào vào lớp support.
+- Không tự sửa file `_NOI_BO/work/interpolation/covariate_support_buffers.gpkg`.
+- Nếu điểm thật nằm ngoài buffer nhưng đã được duyệt giữ lại, tăng `covariate_support_buffer_m` tại `THONG_SO_DU_AN.yml`, rồi chạy lại Quy trình 2 để ứng dụng tái tạo hình học và provenance.
+- Kiểm `support_geometry_privacy.json` và `gee_support_download_summary.json`: hash ROI, hash file support, hash privacy sidecar, schema tối thiểu, source identity, output grid và hash năm raw covariates phải nối đúng; mọi cờ gửi/dùng tọa độ hoặc mã mẫu phải là `false`.
+- Chỉ tiếp tục khi `0_KIEM_TRA_DU_AN.bat` hiển thị `Privacy gate: VERIFIED - NO SAMPLE LOCATION SENT`.
 
 ### Soil Type tạo nhiều điểm `Other`
 
@@ -104,7 +124,7 @@ Chạy `CHAY_THIET_KE_LAY_MAU.bat` đến khi có đủ PC1–PC5 và PCA refere
 
 ### Không có bản đồ dù workflow đã chuẩn bị xong predictor
 
-Nguyên nhân thường gặp nhất là tất cả chỉ tiêu lab vẫn trống. Cũng cần kiểm tra:
+Nếu trạng thái là `WAITING_LAB` và tất cả chỉ tiêu còn trống thì đây là kết quả thành công: ứng dụng chủ ý không tạo bản đồ. Khi đã có số liệu mà vẫn không có bản đồ, kiểm tra:
 
 - cột có chứa số thuần hay bị Excel lưu thành chuỗi;
 - số mẫu có giá trị của từng chỉ tiêu có đủ để chia spatial folds;
@@ -131,7 +151,7 @@ Workflow có cơ chế tái sử dụng covariates và PCA đã có. Vì vậy k
 - tên dự án;
 - bước đang chạy;
 - dòng lỗi đầy đủ hoặc ảnh cửa sổ;
-- `sampling.yml`;
+- `THONG_SO_DU_AN.yml` và `sampling.yml`;
 - tệp QA liên quan;
 - số dòng mẫu và tên chỉ tiêu đang chạy;
 - những file đầu vào vừa thay đổi.

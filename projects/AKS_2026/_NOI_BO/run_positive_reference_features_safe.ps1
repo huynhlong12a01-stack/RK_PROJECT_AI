@@ -1,12 +1,13 @@
 $ErrorActionPreference = 'Stop'
 $internal = $PSScriptRoot
 $project = Split-Path -Parent $internal
-$python = 'D:\apps\POINT_PLANNING_APP\.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $python)) {
-  $found = Get-Command python -ErrorAction SilentlyContinue
-  if (-not $found) { throw 'Khong tim thay Python.' }
-  $python = $found.Source
+$root = [IO.Path]::GetFullPath((Join-Path $project '..\..'))
+$python = Join-Path $root '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+  throw 'Khong tim thay Python Google Earth Engine. Hay chay CAI_DAT_UNG_DUNG.bat.'
 }
-& $python (Join-Path $internal 'pipeline\build_positive_feature_library_safe.py') --project-dir $project
+& $python (Join-Path $internal 'pipeline\extract_positive_feature_knowledge_atomic.py') --project-dir $project
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $python (Join-Path $internal 'pipeline\ingest_positive_feature_knowledge.py') --project-dir $project
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 exit 0

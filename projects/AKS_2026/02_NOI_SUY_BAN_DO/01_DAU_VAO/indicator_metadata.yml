@@ -1,8 +1,8 @@
 # DINH NGHIA CHI TIEU PHAN TICH
 # ------------------------------------------------------------
 # File nay KHONG chua ket qua lab. Ket qua van chi duoc dan vao
-# sample_actual.csv. Moi dong mau duoc hieu la mot ket qua trung binh
-# dai dien cho mau 0-30 cm; ung dung khong tach tang dat.
+# sample_actual.csv. Moi dong mau la mot ket qua trung binh duy nhat
+# cua mau; ung dung khong yeu cau hoac tach cot do sau.
 #
 # Truoc khi noi suy mot chi tieu:
 # 1) doi chieu phieu tra ket qua cua phong thi nghiem;
@@ -17,9 +17,8 @@
 schema_version: 1
 
 sample_support:
-  interpretation: average_result_per_sample
-  nominal_depth_cm: "0-30"
-  split_by_depth: false
+  interpretation: one_average_result_per_sample
+  one_row_per_sample: true
 
 product_policy:
   nutrient_content_maps_only: true

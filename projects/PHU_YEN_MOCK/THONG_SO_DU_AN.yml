@@ -1,0 +1,9 @@
+# Nguon duy nhat cho CRS, grid, buffer ho tro, GEE va khoang ngay covariates.
+project_id: PHU_YEN_MOCK
+crs_mode: auto
+crs_epsg: 32649
+resolution_m: 30
+covariate_support_buffer_m: 300
+gee_project_id: rkapp-492504
+sampling_start_date: "2025-01-01"
+sampling_end_date: "2026-01-01"

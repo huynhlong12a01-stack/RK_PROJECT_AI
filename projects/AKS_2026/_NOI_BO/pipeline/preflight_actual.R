@@ -12,7 +12,7 @@ internal <- file.path(base, "_NOI_BO")
 source(file.path(internal, "pipeline/actual_qa_utils.R"))
 
 sample_file <- file.path(base, "02_NOI_SUY_BAN_DO/01_DAU_VAO/sample_actual.csv")
-roi_file <- file.path(base, "01_THIET_KE_LAY_MAU/01_DAU_VAO/roi.geojson")
+roi_file <- file.path(base, "00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_field_area.geojson")
 clhs_file <- file.path(base, "01_THIET_KE_LAY_MAU/02_KET_QUA/sample_cLHS_FULL.csv")
 soil_file <- file.path(base, "01_THIET_KE_LAY_MAU/01_DAU_VAO/soil_type.geojson")
 sampling_file <- file.path(base, "01_THIET_KE_LAY_MAU/01_DAU_VAO/sampling.yml")
@@ -22,8 +22,13 @@ output_file <- file.path(work_dir, "sample_actual_clean.csv")
 qa_dir <- file.path(work_dir, "qa")
 
 cfg <- yaml::read_yaml(file.path(internal, "config/project.yml"))
+source(file.path(internal, "pipeline/pca_support_provenance_utils.R"))
 epsg <- as.integer(cfg$crs_epsg)
 buffer_m <- as.numeric(cfg$support_policy$covariate_support_buffer_m)
+support_geometry_policy <- as.character(cfg$support_policy$support_geometry_policy %||% "fixed_roi_buffer_no_sample_geometry")
+if (!identical(support_geometry_policy, "fixed_roi_buffer_no_sample_geometry")) {
+  stop("Unsupported support_geometry_policy; sample-derived GEE support geometries are prohibited.")
+}
 qa_file <- cfg$runtime$sample_qa_csv %||% file.path(qa_dir, "sample_roi_status.csv")
 outside_file <- cfg$runtime$outside_points_gpkg %||% file.path(work_dir, "outside_samples.gpkg")
 buffers_file <- cfg$runtime$support_buffers_gpkg %||% file.path(work_dir, "covariate_support_buffers.gpkg")
@@ -31,6 +36,11 @@ assessment_file <- cfg$runtime$actual_assessment_csv %||% file.path(base, "02_NO
 default_relocation_reason <- cfg$outside_sample_review$default_relocation_reason %||% NA_character_
 pca_reference_file <- file.path(internal, "config/pca_model_reference.json")
 pca_provenance_file <- file.path(qa_dir, "pca_current_provenance.json")
+support_download_file <- file.path(qa_dir, "gee_support_download_summary.json")
+support_geometry_privacy_file <- file.path(qa_dir, "support_geometry_privacy.json")
+design_pca_summary_file <- file.path(design_dir, "qa/pca_summary.json")
+design_raw_provenance_file <- file.path(design_dir, "qa/raw_covariate_provenance.json")
+legacy_template_file <- file.path(design_dir, "PC1.tif")
 pca_ref <- jsonlite::read_json(pca_reference_file, simplifyVector = TRUE)
 pca_reference_hash <- as.character(pca_ref$reference_hash)
 pca_reference_version <- as.character(pca_ref$reference_version)
@@ -185,36 +195,71 @@ actual_pc_files <- file.path(work_dir, paste0("PC", 1:5, ".tif"))
 actual_pc_values <- extract_values(actual_pc_files, pts_utm)
 actual_pc_valid_count <- if (is.null(actual_pc_values)) rep(0L, nrow(core)) else rowSums(!is.na(actual_pc_values))
 actual_pc_complete <- actual_pc_valid_count == 5L
-pca_provenance_valid <- FALSE
-pca_provenance_status <- "missing"
-if (file.exists(pca_provenance_file) && all(file.exists(actual_pc_files))) {
-  provenance_check <- tryCatch({
-    provenance <- jsonlite::read_json(pca_provenance_file, simplifyVector = TRUE)
-    recorded_hashes <- unlist(provenance$pc_file_sha256, use.names = TRUE)
-    current_hashes <- setNames(
-      vapply(actual_pc_files, digest::digest, character(1), file = TRUE, algo = "sha256"),
-      basename(actual_pc_files)
-    )
-    hash_names_ok <- all(names(current_hashes) %in% names(recorded_hashes))
-    files_match <- hash_names_ok && all(current_hashes == recorded_hashes[names(current_hashes)])
-    reference_match <- identical(as.character(provenance$pca_reference_hash), pca_reference_hash)
-    version_match <- identical(as.character(provenance$reference_version), pca_reference_version)
-    frozen_match <- isTRUE(provenance$reference_frozen)
-    list(valid = files_match && reference_match && version_match && frozen_match)
-  }, error = function(e) list(valid = FALSE, error = conditionMessage(e)))
-  pca_provenance_valid <- isTRUE(provenance_check$valid)
-  pca_provenance_status <- if (pca_provenance_valid) "verified" else "mismatch_or_invalid"
+support_raw_files <- file.path(work_dir, paste0(continuous_names, ".tif"))
+design_pc_files <- file.path(design_dir, paste0("PC", 1:5, ".tif"))
+design_raw_files <- file.path(design_dir, paste0(continuous_names, ".tif"))
+support_download_check <- tryCatch(
+  pca_support_validate_download(
+    support_download_file, support_raw_files, continuous_names, cfg, roi_file,
+    buffers_file, legacy_template_file
+  ),
+  error = function(e) list(valid = FALSE, reasons = conditionMessage(e))
+)
+support_download_provenance_valid <- isTRUE(support_download_check$valid)
+support_download_provenance_status <- if (support_download_provenance_valid) {
+  "verified"
+} else if (!file.exists(support_download_file)) {
+  "missing"
+} else {
+  "mismatch_or_invalid"
 }
+
+provenance_check <- tryCatch(
+  pca_support_validate_current(
+    pca_provenance_file, actual_pc_files, core, pca_ref, pca_reference_file,
+    cfg, roi_file, buffers_file, support_raw_files, support_download_file,
+    legacy_template_file, design_pca_summary_file, design_pc_files,
+    design_raw_files, design_raw_provenance_file, continuous_names
+  ),
+  error = function(e) list(valid = FALSE, reasons = conditionMessage(e), mode = "invalid")
+)
+pca_provenance_valid <- isTRUE(provenance_check$valid) && all(file.exists(actual_pc_files))
+pca_provenance_mode <- as.character(provenance_check$mode %||% "missing")
+pca_provenance_status <- if (pca_provenance_valid) {
+  paste0("verified:", pca_provenance_mode)
+} else if (!file.exists(pca_provenance_file)) {
+  "missing"
+} else {
+  "mismatch_or_invalid"
+}
+pca_provenance_reasons <- as.character(provenance_check$reasons %||% character())
 current_actual_pca_trusted <- actual_pc_complete & pca_provenance_valid
 requires_pca_refresh <- !current_actual_pca_trusted
 workflow1_grid_support_gap <- !pc_complete
-requires_covariate_support_for_execution <- !actual_pc_complete & workflow1_grid_support_gap
-requires_pca_support_rebuild <- requires_pca_refresh & workflow1_grid_support_gap
-requires_gee_download <- requires_pca_support_rebuild & !current_cov_complete
+requires_local_workflow1_raw_pca_rebuild <-
+  requires_pca_refresh & workflow1_grid_support_gap & cov_complete
+requires_external_covariate_support <-
+  requires_pca_refresh & workflow1_grid_support_gap & !cov_complete
+requires_covariate_support_for_execution <- requires_external_covariate_support
+requires_pca_support_rebuild <- requires_external_covariate_support
+requires_gee_download <- requires_external_covariate_support &
+  (!current_cov_complete | !support_download_provenance_valid)
+external_beyond_fixed_support <- requires_external_covariate_support &
+  distance_to_roi > buffer_m
+if (any(external_beyond_fixed_support)) {
+  stop(
+    "Actual sample support exceeds covariate_support_buffer_m for ",
+    sum(external_beyond_fixed_support),
+    " sample(s); maximum ROI distance is ",
+    round(max(distance_to_roi[external_beyond_fixed_support]), 1),
+    " m. Review target scope, then increase covariate_support_buffer_m only in THONG_SO_DU_AN.yml before any GEE request."
+  )
+}
 covariate_support_status <- ifelse(
   current_actual_pca_trusted, "ready_current_pca_verified",
   ifelse(pc_complete, "covered_workflow1_pca",
-    ifelse(actual_pc_complete, "current_pca_available_unverified_requires_refresh", "missing_requires_support_extension"))
+    ifelse(cov_complete, "verified_workflow1_raw_ready_for_local_pca_rebuild",
+      ifelse(actual_pc_complete, "current_pca_available_unverified_requires_refresh", "missing_requires_external_support_extension")))
 )
 soil_source_class <- rep(NA_character_, nrow(core))
 soil_model_group <- rep(NA_character_, nrow(core))
@@ -231,17 +276,24 @@ if (file.exists(soil_file)) {
   hit_idx <- vapply(hit, function(x) if (length(x)) x[[1]] else NA_integer_, integer(1))
   present <- !is.na(hit_idx)
   soil_source_class[present] <- trimws(as.character(soil[[soil_field]][hit_idx[present]]))
-  soil_source_class[is.na(soil_source_class) | soil_source_class == ""] <- "Other"
-  counts <- sort(table(soil_source_class[soil_source_class != "Other"]), decreasing = TRUE)
+  soil_source_class[is.na(soil_source_class) | soil_source_class == ""] <- "Unmapped"
+  counts <- sort(table(soil_source_class[soil_source_class != "Unmapped"]), decreasing = TRUE)
   retained <- names(counts[counts >= 5L])
-  soil_model_group <- ifelse(soil_source_class %in% retained, soil_source_class, "Other")
-  soil_other_reason <- ifelse(
-    soil_source_class == "Other", "outside_or_unclassified_soil_polygon",
-    ifelse(soil_model_group == "Other", "rare_class_collapsed", "not_other")
+  soil_model_group <- ifelse(
+    soil_source_class == "Unmapped", "Unmapped",
+    ifelse(soil_source_class %in% retained, soil_source_class, "Other")
   )
-  soil_assessment_status <- ifelse(soil_model_group == "Other", "other", "known_model_group")
+  soil_other_reason <- ifelse(
+    soil_source_class == "Unmapped", "outside_or_unclassified_soil_polygon",
+    ifelse(soil_model_group == "Other", "rare_mapped_class_collapsed", "not_other")
+  )
+  soil_assessment_status <- ifelse(
+    soil_model_group == "Unmapped", "unmapped",
+    ifelse(soil_model_group == "Other", "other", "known_model_group")
+  )
 }
 soil_other <- soil_model_group == "Other"
+soil_unmapped <- soil_model_group == "Unmapped"
 
 target_status <- assessment$target_population_status
 sampling_support_status <- assessment$sampling_support_status
@@ -281,17 +333,22 @@ qa <- data.frame(
   current_actual_pc_valid_count = actual_pc_valid_count,
   current_actual_pca_complete = actual_pc_complete,
   current_pca_provenance_status = pca_provenance_status,
+  current_pca_provenance_mode = pca_provenance_mode,
+  support_download_provenance_status = support_download_provenance_status,
   current_actual_pca_trusted = current_actual_pca_trusted,
   requires_pca_refresh = requires_pca_refresh,
   covariate_support_status = covariate_support_status,
   workflow1_grid_support_gap = workflow1_grid_support_gap,
   requires_covariate_support_for_execution = requires_covariate_support_for_execution,
+  requires_local_workflow1_raw_pca_rebuild = requires_local_workflow1_raw_pca_rebuild,
+  requires_external_covariate_support = requires_external_covariate_support,
   requires_pca_support_rebuild = requires_pca_support_rebuild,
   requires_gee_download = requires_gee_download,
   requires_covariate_support = requires_covariate_support_for_execution,
   soil_source_class = soil_source_class,
   soil_model_group = soil_model_group,
   soil_other = soil_other,
+  soil_unmapped = soil_unmapped,
   soil_other_reason = soil_other_reason,
   soil_assessment_status = soil_assessment_status,
   planned_link_status = links$planned_link_status,
@@ -326,14 +383,70 @@ if (length(outside_idx)) {
   st_write(outside, outside_file, layer = "outside_roi_samples", quiet = TRUE)
 }
 
-if (file.exists(buffers_file)) unlink(buffers_file)
 support_idx <- which(requires_pca_support_rebuild)
+preserve_verified_support_buffer <- pca_provenance_valid &&
+  identical(pca_provenance_mode, "support_rebuild_from_verified_gee_covariates")
+reuse_certified_support_geometry <- length(support_idx) > 0L &&
+  support_download_provenance_valid &&
+  file.exists(buffers_file) && file.exists(support_geometry_privacy_file)
 if (length(support_idx)) {
-  support_points <- pts_utm[support_idx, ]
-  support_points$covariate_support_status <- covariate_support_status[support_idx]
-  buffers <- st_buffer(support_points, dist = buffer_m)
-  buffers$support_buffer_m <- buffer_m
-  st_write(buffers, buffers_file, layer = "covariate_support_buffers", quiet = TRUE)
+  if (!reuse_certified_support_geometry) {
+  if (file.exists(buffers_file)) unlink(buffers_file)
+  if (file.exists(support_geometry_privacy_file)) unlink(support_geometry_privacy_file)
+  # Privacy-preserving compact support: a fixed metric buffer around the
+  # bounding envelope of the reviewed ROI. Because ROI is contained by its
+  # envelope, this also contains every location within buffer_m of the ROI.
+  # No actual sample point, code, latitude or longitude defines this geometry.
+  support_roi <- st_make_valid(st_transform(st_read(roi_file, quiet = TRUE), epsg))
+  support_envelope <- st_as_sfc(st_bbox(support_roi))
+  support_geometry <- st_sf(
+    support_geometry_policy = support_geometry_policy,
+    support_buffer_m = buffer_m,
+    contains_sample_attributes = FALSE,
+    geometry = st_buffer(support_envelope, dist = buffer_m, nQuadSegs = 30)
+  )
+  st_write(
+    support_geometry, buffers_file,
+    layer = "roi_fixed_covariate_support", quiet = TRUE
+  )
+  support_privacy <- list(
+    schema_version = "1.0.0",
+    provenance_type = "privacy_preserving_support_geometry",
+    status = "certified_by_preflight",
+    project_id = as.character(cfg$project_id),
+    support_geometry_policy = support_geometry_policy,
+    geometry_source = "reviewed_roi_bounding_envelope_plus_fixed_metric_buffer",
+    geometry_derivation = "sf_projected_bbox_then_st_buffer_nQuadSegs_30",
+    coverage_guarantee = "contains_the_fixed_metric_buffer_of_the_reviewed_roi",
+    project_crs = paste0("EPSG:", epsg),
+    support_buffer_m = buffer_m,
+    feature_count = nrow(support_geometry),
+    attribute_schema = c(
+      "support_geometry_policy", "support_buffer_m", "contains_sample_attributes"
+    ),
+    contains_sample_attributes = FALSE,
+    sample_coordinates_or_identifiers_used_to_define_geometry = FALSE,
+    sample_coordinates_or_identifiers_in_attributes = FALSE,
+    roi_field_area_sha256 = digest::digest(
+      file = roi_file, algo = "sha256", serialize = FALSE
+    ),
+    support_geometry_file_sha256 = digest::digest(
+      file = buffers_file, algo = "sha256", serialize = FALSE
+    )
+  )
+  privacy_tmp <- paste0(support_geometry_privacy_file, ".tmp")
+  jsonlite::write_json(
+    support_privacy, privacy_tmp, pretty = TRUE, auto_unbox = TRUE,
+    digits = 17, null = "null", na = "null"
+  )
+  if (file.exists(support_geometry_privacy_file)) unlink(support_geometry_privacy_file)
+  if (!file.rename(privacy_tmp, support_geometry_privacy_file)) {
+    stop("Could not atomically publish support geometry privacy provenance.")
+  }
+  }
+} else if (!preserve_verified_support_buffer) {
+  if (file.exists(buffers_file)) unlink(buffers_file)
+  if (file.exists(support_geometry_privacy_file)) unlink(support_geometry_privacy_file)
 }
 
 filled <- indicator_cols[vapply(clean[indicator_cols], function(x) any(is.finite(x)), logical(1))]
@@ -391,18 +504,33 @@ summary <- list(
   n_workflow1_grid_support_gap = sum(workflow1_grid_support_gap),
   n_requiring_covariate_support_for_execution = sum(requires_covariate_support_for_execution),
   n_requiring_covariate_support = sum(requires_covariate_support_for_execution),
+  n_requiring_local_workflow1_raw_pca_rebuild = sum(requires_local_workflow1_raw_pca_rebuild),
+  n_requiring_external_covariate_support = sum(requires_external_covariate_support),
   n_requiring_pca_support_rebuild = sum(requires_pca_support_rebuild),
   n_requiring_gee_download = sum(requires_gee_download),
   support_buffer_m = buffer_m,
+  support_geometry_policy = support_geometry_policy,
+  support_geometry_source = if (file.exists(support_geometry_privacy_file)) "reviewed_roi_bounding_envelope_plus_fixed_metric_buffer" else "not_required_verified_workflow1_raw_local_rebuild",
+  download_geometry_is_prediction_domain = FALSE,
+  analytical_support_mask_policy = "workflow1_pc_mask_plus_actual_sample_cells_local_only",
+  support_geometry_contains_sample_attributes = FALSE,
+  support_geometry_privacy_provenance_status = if (file.exists(support_geometry_privacy_file)) "certified_by_preflight" else "not_required_or_missing",
+  support_geometry_privacy_provenance_file = normalizePath(support_geometry_privacy_file, winslash = "/", mustWork = FALSE),
   n_with_complete_current_actual_pc = sum(actual_pc_complete),
   pca_reference_hash = pca_reference_hash,
   pca_reference_frozen = pca_reference_frozen,
   pca_reference_version = pca_reference_version,
   current_pca_provenance_status = pca_provenance_status,
+  current_pca_provenance_mode = pca_provenance_mode,
   current_pca_provenance_valid = pca_provenance_valid,
+  current_pca_provenance_reasons = pca_provenance_reasons,
+  support_download_provenance_status = support_download_provenance_status,
+  support_download_provenance_valid = support_download_provenance_valid,
+  support_download_provenance_reasons = as.character(support_download_check$reasons %||% character()),
   n_with_trusted_current_actual_pc = sum(current_actual_pca_trusted),
   n_requiring_pca_refresh = sum(requires_pca_refresh),
   n_soil_other = sum(soil_other, na.rm = TRUE),
+  n_soil_unmapped = sum(soil_unmapped, na.rm = TRUE),
   soil_type_status = if (file.exists(soil_file)) "configured" else "not_configured",
   planned_link_policy = "distance computed only for exact code or declared planned_point_id; no nearest-point substitution",
   n_planned_links_available = sum(!is.na(links$planned_point_id)),

@@ -45,24 +45,28 @@ QUY TRÌNH 2: nội suy -> QA -> bản đồ trong ROI_field_area
 ## Bắt đầu nhanh
 
 1. Nhấp `CREATE_NEW_PROJECT.bat` và mở dự án vừa tạo.
-2. Nhấp `0_KIEM_TRA_DU_AN.bat`.
-3. Ở Bước 0, cung cấp một trong hai bộ đầu vào:
+2. Kiểm tra `THONG_SO_DU_AN.yml` ở thư mục gốc dự án: đây là nguồn duy nhất cho CRS, GEE project, `resolution_m`, `covariate_support_buffer_m` và ngày tải covariates.
+3. Nhấp `0_KIEM_TRA_DU_AN.bat`.
+4. Ở Bước 0, cung cấp một trong hai bộ đầu vào:
    - `roi_field_area.geojson` đã được xác nhận; hoặc
-   - `roi_search.geojson` + `sugarcane_labels.csv` có cả hai lớp.
-4. Nếu phải giải đoán, xác nhận lịch thời vụ trong `interpretation.yml`, chạy Bước 0, review ứng viên và chạy lại với `roi_field_area.geojson` đã duyệt.
-5. Thêm Soil Type nếu có, kiểm tra `sampling.yml` và chạy Quy trình 1.
-6. Chọn FULL hoặc REDUCED để đi thực địa.
-7. Cập nhật `sample_actual.csv` và `indicator_metadata.yml`, rồi chạy Quy trình 2.
+   - `roi_search.geojson` + bản sao của `sugarcane_labels_template.csv` đã đổi tên thành `sugarcane_labels.csv` và có cả hai lớp.
+5. Nếu phải giải đoán, xác nhận lịch thời vụ trong `interpretation.yml`, chạy Bước 0, review ứng viên và chạy lại với `roi_field_area.geojson` đã duyệt.
+6. Thêm Soil Type nếu có, kiểm tra các tham số cLHS trong `sampling.yml` và chạy Quy trình 1.
+7. Chọn FULL hoặc REDUCED để đi thực địa.
+8. Cập nhật `sample_actual.csv` và `indicator_metadata.yml`, rồi chạy Quy trình 2.
+
+`THONG_SO_DU_AN.yml` không thay thế các tệp đầu vào chuyên môn; người dùng vẫn phải cung cấp ROI/nhãn, Soil Type nếu có, tham số thiết kế, phenology và kết quả lab đúng giai đoạn.
 
 ## Nơi người dùng được thao tác
 
 ```text
 projects/TEN_DU_AN/
+  THONG_SO_DU_AN.yml  <- nguồn duy nhất cho CRS, GEE, lưới, buffer support và ngày covariates
   00_XAC_LAP_VUNG_MIA/
     01_DAU_VAO/       <- ROI field/search, nhãn và interpretation.yml
     02_KET_QUA/       <- ứng viên và QA; không dùng trực tiếp nếu chưa review
   01_THIET_KE_LAY_MAU/
-    01_DAU_VAO/       <- Soil Type tùy chọn và sampling.yml
+    01_DAU_VAO/       <- Soil Type tùy chọn và sampling.yml cho tham số cLHS
     02_KET_QUA/       <- FULL, REDUCED và QA
   02_NOI_SUY_BAN_DO/
     01_DAU_VAO/       <- sample_actual.csv + indicator_metadata.yml

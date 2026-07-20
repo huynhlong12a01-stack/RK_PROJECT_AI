@@ -10,7 +10,7 @@ from rasterio.transform import from_origin
 
 ROOT = Path(__file__).resolve().parents[4]
 PROJECT = ROOT / "projects" / "AKS_2026"
-ROI_FILE = PROJECT / "01_THIET_KE_LAY_MAU" / "01_DAU_VAO" / "roi.geojson"
+ROI_FILE = PROJECT / "00_XAC_LAP_VUNG_MIA" / "01_DAU_VAO" / "roi_field_area.geojson"
 CONFIG_FILE = PROJECT / "_NOI_BO" / "config" / "project.yml"
 OUTPUT_FILE = PROJECT / "_NOI_BO" / "work" / "design" / "grid_template.tif"
 NODATA = -9999.0
@@ -20,7 +20,7 @@ def config_number(name, default):
     if not CONFIG_FILE.exists():
         return default
     text = CONFIG_FILE.read_text(encoding="utf-8")
-    match = re.search(rf"(?m)^\s*{re.escape(name)}\s*:\s*([0-9.]+)\s*$", text)
+    match = re.search(rf"(?m)^[ \t]*{re.escape(name)}[ \t]*:[ \t]*([0-9.]+)[ \t]*$", text)
     return float(match.group(1)) if match else default
 
 

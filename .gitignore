@@ -1,7 +1,11 @@
 # Runtime output and temporary files
-output/
 .tmp/
 .tools/
+.venv/
+projects/CODEX_SMOKE_*/
+projects/.creating_*/
+_UNG_DUNG/runtime/*
+!_UNG_DUNG/runtime/.gitkeep
 *.log
 *.tmp
 
@@ -16,8 +20,6 @@ projects/*/_NOI_BO/R_library/
 .Rproj.user/
 
 # Raw/private geospatial inputs and generated rasters
-input/raster/
-input/points/soil_points.csv
 *.tif
 *.tiff
 
@@ -30,29 +32,20 @@ projects/*/00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_search.*
 projects/*/00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_field_area.*
 projects/*/00_XAC_LAP_VUNG_MIA/01_DAU_VAO/sugarcane_labels.*
 projects/*/00_XAC_LAP_VUNG_MIA/02_KET_QUA/
-projects/*/01_THIET_KE_LAY_MAU/01_DAU_VAO/roi.*
 projects/*/01_THIET_KE_LAY_MAU/01_DAU_VAO/soil_type.*
 projects/*/01_THIET_KE_LAY_MAU/02_KET_QUA/
 projects/*/02_NOI_SUY_BAN_DO/01_DAU_VAO/sample_actual.csv
 projects/*/02_NOI_SUY_BAN_DO/01_DAU_VAO/outside_sample_review.csv
 projects/*/02_NOI_SUY_BAN_DO/02_KET_QUA/
 
-# Keep reusable input templates, ignore timestamped retries
-input/points/soil_points_template_*.xlsx
-
-# Agent runtime products
-agent/history/
-agent/responses/
-agent/decisions/validated*.json
-agent/requests/run_request_*.json
-!agent/requests/run_request_template.json
-
-# Local smoke/debug requests
-agent/requests/*smoke*.json
+# Shared raw national datasets remain local
+shared_data/soil_type_vietnam/raw/*
+!shared_data/soil_type_vietnam/raw/.gitkeep
 
 # Generated backups and archives
-scripts/main_before_*.R
+_UNG_DUNG/engine/scripts/main_before_*.R
 *.zip
+
 # RAG local/copyrighted source files and generated indexes
 knowledge/library/
 knowledge/index/vector_store/

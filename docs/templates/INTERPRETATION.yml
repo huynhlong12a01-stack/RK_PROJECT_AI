@@ -1,6 +1,10 @@
-# auto: dùng ROI field có sẵn; nếu không có thì cần ROI search + nhãn đã kiểm chứng.
+# Cac gia tri CRS, GEE va resolution ben duoi duoc dong bo tu THONG_SO_DU_AN.yml.
+# Nguoi dung chi sua chung tai THONG_SO_DU_AN.yml; tep nay van dung cho mode,
+# phenology, lich mua vu va cac cong phan loai.
+# auto: dung ROI field co san; neu khong co thi can ROI search + nhan da kiem chung.
 mode: auto
 resolution_m: 10
+crs_mode: auto
 crs_epsg: 32649
 gee_project_id: rkapp-492504
 

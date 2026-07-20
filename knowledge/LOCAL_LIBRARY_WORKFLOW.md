@@ -14,16 +14,16 @@ Curated corpus là mặc định vì có DOI/URL và giới hạn sử dụng r�
 1. Đặt tài liệu hợp pháp vào knowledge/library theo thư mục chủ đề.
 2. Chạy:
 
-       .\run_rag_inventory.ps1
+       .\_UNG_DUNG\tools\run_rag_inventory.ps1
 
 3. Mở knowledge/metadata/local_library_inventory.csv và kiểm tra title, tác giả, năm, DOI/URL, quyền sử dụng. needs_review không được xem là bằng chứng đã xác minh.
 4. Tạo private chunks:
 
-       .\run_rag_build_local_index.ps1
+       .\_UNG_DUNG\tools\run_rag_build_local_index.ps1
 
 5. Tra cứu file local cụ thể bằng cách truyền đường dẫn chunks nếu cần:
 
-       .\run_rag_query.ps1 -Query "variogram residual" -Chunks "knowledge/index/local_chunks/chunks.jsonl"
+       .\_UNG_DUNG\tools\run_rag_query.ps1 -Query "variogram residual" -Chunks "knowledge/index/local_chunks/chunks.jsonl"
 
 ## Giới hạn
 

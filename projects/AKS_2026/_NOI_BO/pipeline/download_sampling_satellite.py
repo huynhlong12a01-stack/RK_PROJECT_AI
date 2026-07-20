@@ -5,15 +5,16 @@ rasters into the internal design workspace. Existing complete rasters are reused
 by the one-click workflow unless the user requests a forced download.
 """
 
+import hashlib
 import importlib.util
 import json
-import sys
-import types
+import shutil
 from pathlib import Path
 
 import ee
 import geopandas as gpd
 import rasterio
+import yaml
 from pyproj import Transformer
 from rasterio.windows import Window
 from shapely.geometry import box
@@ -23,29 +24,20 @@ from scientific_metadata import covariate_provenance
 
 ROOT = Path(__file__).resolve().parents[4]
 PROJECT = ROOT / "projects" / "AKS_2026"
-ROI_FILE = PROJECT / "01_THIET_KE_LAY_MAU" / "01_DAU_VAO" / "roi.geojson"
-TEMPLATE_FILE = PROJECT / "_NOI_BO" / "work" / "design" / "PC1.tif"
+ROI_FILE = PROJECT / "00_XAC_LAP_VUNG_MIA" / "01_DAU_VAO" / "roi_field_area.geojson"
+TEMPLATE_FILE = PROJECT / "_NOI_BO" / "work" / "design" / "grid_template.tif"
 OUTPUT_DIR = PROJECT / "_NOI_BO" / "work" / "design"
 TILE_DIR = PROJECT / "_NOI_BO" / "work" / "design" / "qa" / "download_tiles"
 QA_FILE = PROJECT / "_NOI_BO" / "work" / "design" / "qa" / "download_summary.json"
-GEE_PROJECT_ID = "rkapp-492504"
+RAW_PROVENANCE_FILE = QA_FILE.parent / "raw_covariate_provenance.json"
+CONFIG_FILE = PROJECT / "_NOI_BO" / "config" / "project.yml"
 TILE_PIXELS = 512
 
-cfg = {
-    "project_id": "AKS_2026",
-    "crs_epsg": 32649,
-    "resolution_m": 10,
-    "source": {"legacy_pca_dir": str(TEMPLATE_FILE.parent)},
-    "legacy_parameters": {"start_date": "2026-01-01", "end_date": "2026-04-01"},
-    "runtime": {
-        "support_buffers_gpkg": str(ROI_FILE),
-        "expanded_covariate_dir": str(OUTPUT_DIR),
-        "qa_dir": str(QA_FILE.parent),
-    },
-}
-yaml_shim = types.ModuleType("yaml")
-yaml_shim.safe_load = lambda _text: cfg
-sys.modules["yaml"] = yaml_shim
+with CONFIG_FILE.open("r", encoding="utf-8") as stream:
+    cfg = yaml.safe_load(stream)
+if not isinstance(cfg, dict):
+    raise ValueError(f"Invalid project configuration: {CONFIG_FILE}")
+GEE_PROJECT_ID = str(cfg["gee_project_id"])
 
 source_script = PROJECT / "_NOI_BO" / "pipeline" / "02_download_gee_support.py"
 spec = importlib.util.spec_from_file_location("aks_gee_support", source_script)
@@ -53,6 +45,14 @@ gee_support = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gee_support)
 gee_support.SOURCE_DIR = OUTPUT_DIR
 gee_support.TILE_DIR = TILE_DIR
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def main():
@@ -100,9 +100,20 @@ def main():
         start_date=gee_support.START_DATE,
         end_date=gee_support.END_DATE,
     )
+    raw_hashes = {
+        name: sha256_file(OUTPUT_DIR / f"{name}.tif")
+        for name in gee_support.BAND_NAMES
+    }
+    provenance["source_identity"] = {
+        "gee_project_id": GEE_PROJECT_ID,
+        "roi_field_area_sha256": sha256_file(ROI_FILE),
+    }
+    provenance["raw_covariate_sha256"] = raw_hashes
     summary = {
         "project_id": cfg["project_id"],
         "purpose": "satellite covariates before sampling design",
+        "gee_project_id": GEE_PROJECT_ID,
+        "roi_field_area_sha256": provenance["source_identity"]["roi_field_area_sha256"],
         "bands": gee_support.BAND_NAMES,
         "tiles": len(windows),
         "completed": completed,
@@ -119,6 +130,10 @@ def main():
     (QA_FILE.parent / "covariate_provenance.json").write_text(
         json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    RAW_PROVENANCE_FILE.write_text(
+        json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    shutil.rmtree(TILE_DIR, ignore_errors=True)
     print("Full-area sampling covariate download complete.")
 
 

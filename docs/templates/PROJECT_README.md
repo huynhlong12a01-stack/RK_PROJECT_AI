@@ -1,13 +1,15 @@
 # {{PROJECT_ID}}
 
-Dự án có ba giai đoạn nối tiếp. Người dùng chỉ thao tác trong các thư mục `00`, `01`, `02`; không chỉnh `_NOI_BO`.
+`THONG_SO_DU_AN.yml` ở thư mục gốc là nguồn duy nhất cho `crs_mode`/`crs_epsg`, `gee_project_id`, `resolution_m`, `covariate_support_buffer_m` và ngày tải covariates. Với `crs_mode: auto`, CRS được xác định từ ROI và đồng bộ giữa ba giai đoạn; không giữ EPSG 32649 cho dự án ở múi khác.
+
+Đây không phải tệp duy nhất người dùng cần sửa. ROI/nhãn, phenology, Soil Type, tham số cLHS, `sample_actual.csv` và metadata lab vẫn nằm ở các tệp chuyên trách. Người dùng chỉ thao tác trong các thư mục `00`, `01`, `02` cùng `THONG_SO_DU_AN.yml`; không chỉnh `_NOI_BO`.
 
 ## Bước 0 — Xác lập ROI_field_area
 
 Chọn một trong hai cách:
 
 - Đã có ranh giới mía: đặt `00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_field_area.geojson`.
-- Chưa có ranh giới: đặt `roi_search.geojson`, tạo `sugarcane_labels.csv` có cả `label=1` và `label=0` đã kiểm chứng, rồi hoàn thiện `interpretation.yml`.
+- Chưa có ranh giới: đặt `roi_search.geojson`, sao chép `sugarcane_labels_template.csv` thành `sugarcane_labels.csv` rồi điền cả `label=1` và `label=0` đã kiểm chứng; hoàn thiện phenology/cổng phân loại trong `interpretation.yml`.
 
 Khi giải đoán, phải xác nhận lịch thời vụ địa phương và chỉ dùng các kỳ ảnh đã hoàn tất. Kết quả `roi_field_area_candidate` là vùng ứng viên; review thủ công trên ảnh và bằng kiến thức thực địa, sau đó lưu bản đã duyệt thành `roi_field_area.geojson` và chạy lại Bước 0.
 
@@ -15,7 +17,7 @@ Thư viện AKS chỉ là `positive_reference_only`, không phải mô hình nh�
 
 ## Quy trình 1 — Thiết kế lấy mẫu
 
-Đặt `soil_type.geojson` nếu có và kiểm tra `sampling.yml` trong `01_THIET_KE_LAY_MAU/01_DAU_VAO`. Bước 0 cung cấp ROI đã duyệt.
+Đặt `soil_type.geojson` nếu có và kiểm tra số mẫu, spacing cùng tham số cLHS trong `sampling.yml`. CRS, GEE, lưới và ngày covariates không sửa tại đây mà lấy từ `THONG_SO_DU_AN.yml`. Bước 0 cung cấp ROI đã duyệt.
 
 Với `clhs_backend: auto`, ứng dụng ưu tiên gói CRAN `clhs`:
 
@@ -24,7 +26,7 @@ Với `clhs_backend: auto`, ứng dụng ưu tiên gói CRAN `clhs`:
 - toàn bộ FULL là thiết kế lai, không phải cLHS thuần;
 - nếu fallback, QA ghi `python_clhs_like` và lõi `lhs_core`.
 
-FULL và REDUCED không được xem là có chất lượng tương đương. Lưới 10 m không nâng độ phân giải gốc của covariates.
+FULL và REDUCED không được xem là có chất lượng tương đương. Giá trị `resolution_m` chỉ đặt lưới tính toán/xuất và không nâng độ phân giải gốc của covariates.
 
 ## Quy trình 2 — Nội suy
 

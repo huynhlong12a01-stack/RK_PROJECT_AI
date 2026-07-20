@@ -14,7 +14,7 @@ Thư viện AKS là `positive_reference_only`, không phải mô hình nhị ph�
 
 ### Thiết kế lấy mẫu
 
-Đầu vào người dùng: `ROI_field_area` đã duyệt, Soil Type tùy chọn và `sampling.yml`.
+Đầu vào người dùng: `ROI_field_area` đã duyệt, Soil Type tùy chọn, `THONG_SO_DU_AN.yml` cho cấu hình chung và `sampling.yml` cho tham số thiết kế cLHS.
 
 Dòng xử lý: tải covariates, chuẩn hóa, fit PCA reference, tạo lõi conditioned Latin hypercube, rồi xuất REDUCED và FULL sau bổ sung không gian.
 
@@ -30,7 +30,10 @@ REDUCED là tập con lõi. FULL bổ sung spatial infill và short-lag. Không 
 
 Tọa độ là nơi đã lấy thực tế, không phải điểm kế hoạch. Mẫu ngoài ROI không tự bị loại; chúng chỉ được dùng khi có predictor hợp lệ, cùng target population/support và không tạo ngoại suy nguy hiểm. Bản đồ cuối mask về ROI.
 
-PCA reference của workflow 1 được tái sử dụng; không fit PCA mới trên sample_actual. Khi có Soil Type, engine so PC_ONLY và PC_PLUS_SOIL. Soil Type là categorical; Other là nhóm coverage kỹ thuật, không phải một lớp đất đồng nhất.
+PCA reference của workflow 1 được tái sử dụng; không fit PCA mới trên sample_actual. Khi có Soil Type, engine so PC_ONLY và PC_PLUS_SOIL. Soil Type là categorical. `Unmapped` là thiếu coverage polygon; `Other` chỉ gộp lớp nguồn đã map nhưng thiếu mẫu. Cả hai không phải một lớp đất đồng nhất.
+
+Tính nhất quán được kiểm ở mức byte và tham số: hash của năm raw covariates, sidecar tải, PCA reference và PC1–PC5 phải đồng thời khớp. Metadata-only không được cấp lại chứng cứ nếu lineage cũ thiếu hoặc sai. PCA fit mới dùng seed cấu hình và ghi môi trường phần mềm; đây không phải cam kết bitwise reproducibility qua mọi phiên bản.
+
 
 ## 2. Nested spatial cross-validation
 
@@ -85,7 +88,7 @@ PC_PLUS_SOIL không được ưu tiên mặc định. Nhóm Other hoặc lớp �
 Ranh giới ROI không phải tiêu chí duy nhất cho tính hợp lệ. Với điểm ngoài ROI, cần đánh giá:
 
 - thuộc cùng quần thể/vùng quản lý mục tiêu;
-- cùng độ sâu và quy trình mẫu;
+- cùng quy trình lấy mẫu và cùng cách tổng hợp một kết quả cho mỗi mẫu;
 - covariates đầy đủ;
 - covariate dissimilarity/Area of Applicability;
 - khoảng cách tới ROI và điểm kế hoạch nếu có;
@@ -119,13 +122,13 @@ Không tự map một alias mơ hồ như P, K, OM hoặc EC sang profile chuyê
 
 ## 9. Scale, raster manifest và provenance
 
-Lưới output 10 m chỉ là computational grid. Native scale hiện gồm NDVI 10 m, SRTM/Slope khoảng 30 m, MERIT Hydro 92,77 m và CHIRPS khoảng 5.566 m. Resampling không tạo chi tiết mới.
+`resolution_m` trong `THONG_SO_DU_AN.yml` chỉ đặt computational grid; ví dụ lưới output 10 m không đồng nghĩa mọi predictor có support 10 m. Native scale hiện gồm NDVI 10 m, SRTM/Slope khoảng 30 m, MERIT Hydro 92,77 m và CHIRPS khoảng 5.566 m. Resampling không tạo chi tiết mới.
 
 Raster continuous dùng bilinear khi phù hợp; categorical dùng nearest-neighbour. Soil class code không được dùng như số liên tục.
 
 Mọi run cần lưu asset ID, phiên bản, date range, temporal reducer, cloud threshold, CRS, export scale, resampling, công thức TWI/NDVI và PCA center/scale/loadings.
 
-Manifest dự án do workflow quản lý ở projects/TEN_DU_AN/_NOI_BO/config. Người dùng không chỉnh thủ công; các thông tin công bố phải được copy vào report/QA.
+Người dùng chỉ sửa CRS, GEE, `resolution_m` và ngày covariates tại `projects/TEN_DU_AN/THONG_SO_DU_AN.yml`. Workflow đồng bộ các giá trị này sang manifest kỹ thuật trong `_NOI_BO/config`; người dùng không chỉnh bản sao kỹ thuật thủ công và các thông tin công bố phải được copy vào report/QA.
 
 ## 10. Output và trạng thái
 
@@ -166,3 +169,5 @@ Ba mức thông tin:
 Dự án chưa tự động tạo independent probability validation set, total calibrated predictive uncertainty, anisotropic fit được chuyên gia xác nhận, hoặc khuyến cáo liều phân theo hiệu chuẩn cây mía địa phương.
 
 Cơ sở nguồn và evidence cards nằm trong knowledge/README.md và knowledge/CATALOG.md.
+
+Soil Type lineage phải ghi và kiểm `soil_source_sha256`, source field, encoding/code-map, hash raster/output và overlap QA. Quy trình 2 fail-closed nếu bất kỳ định danh thực thi nào đổi; metadata license chưa rõ chỉ là cảnh báo publication, không tự chặn xử lý cục bộ.

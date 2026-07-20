@@ -27,7 +27,7 @@ from true_clhs_backend import fallback_metadata, method_metadata, select_true_cl
 
 ROOT = Path(__file__).resolve().parents[4]
 PROJECT = ROOT / "projects" / "AKS_2026"
-ROI_FILE = PROJECT / "01_THIET_KE_LAY_MAU" / "01_DAU_VAO" / "roi.geojson"
+ROI_FILE = PROJECT / "00_XAC_LAP_VUNG_MIA" / "01_DAU_VAO" / "roi_field_area.geojson"
 PREDICTOR_DIR = PROJECT / "_NOI_BO" / "work" / "design"
 SOIL_GROUP_FILE = PREDICTOR_DIR / "Soil_Group_Code.tif"
 OUTPUT_DIR = PREDICTOR_DIR
@@ -114,6 +114,7 @@ def _fallback_core(features, coords, soils, rng, reason):
                 quota,
                 coords[selected] if selected else [],
                 rng,
+                minimum_spacing_m=MIN_SPACING_M,
             )
         )
     if len(selected) < CORE_SAMPLES:
@@ -161,6 +162,25 @@ def _select_core(features, coords, soils, rng):
         print(f"[WARN] Official CRAN clhs unavailable; declared fallback used: {exc}")
         selected, metadata = _fallback_core(features, coords, soils, rng, str(exc))
         return selected, metadata, requested
+
+
+def _core_spacing_metrics(indices, coords):
+    index = np.asarray(indices, dtype=int)
+    if len(index) < 2:
+        raise RuntimeError("At least two core samples are required for spacing QA.")
+    points = coords[index]
+    delta = points[:, None, :] - points[None, :, :]
+    distances = np.sqrt(np.sum(delta * delta, axis=2))
+    upper = distances[np.triu_indices(len(points), k=1)]
+    tolerance_m = max(1e-9, abs(float(MIN_SPACING_M)) * 1e-12)
+    violations = int(np.sum(upper < (float(MIN_SPACING_M) - tolerance_m)))
+    return {
+        "minimum_spacing_target_m": float(MIN_SPACING_M),
+        "minimum_pair_distance_m": float(np.min(upper)),
+        "spacing_violation_pairs": violations,
+        "minimum_spacing_target_met": violations == 0,
+        "numerical_tolerance_m": tolerance_m,
+    }
 
 
 def _augment_core(selected, coords, roi, rng):
@@ -216,6 +236,11 @@ def main():
     rng = np.random.default_rng(SEED)
     features, coords, soils, roi, output_crs, candidate_metadata = _build_candidates(rng)
     core, backend, backend_requested = _select_core(features, coords, soils, rng)
+    core_spacing = _core_spacing_metrics(core, coords)
+    if not core_spacing["minimum_spacing_target_met"]:
+        raise RuntimeError(
+            "Selected sampling core violates minimum_spacing_m; no plan is published."
+        )
     true_clhs_used = backend.get("backend_used") == "r_clhs_cran"
     selected, roles, eval_ids, roi_area_m2, dynamic_dmax, augmentation = (
         _augment_core(core, coords, roi, rng)
@@ -277,6 +302,8 @@ def main():
         "dynamic_dmax_m": dynamic_dmax,
         "minimum_spacing_m": MIN_SPACING_M,
         "minimum_spacing_target_m": MIN_SPACING_M,
+        "minimum_spacing_target_met": True,
+        "core_spacing": core_spacing,
         "inner_buffer_m": INNER_BUFFER_M,
         "random_seed": SEED,
         "nested_design": True,
