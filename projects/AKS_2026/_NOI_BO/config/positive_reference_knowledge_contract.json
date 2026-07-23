@@ -1,5 +1,5 @@
 {
-  "contract_version": "2.0.0",
+  "contract_version": "2.0.1",
   "package_id": "AKS_2026_positive_temporal_reference_v2",
   "artifact_semantics": "positive_reference_only",
   "source_project": "AKS_2026",
@@ -12,7 +12,7 @@
   "required_feature_contract": {
     "predictor_band_count": 75,
     "feature_schema_semantic_sha256": "5e9d72d6c13b45877824c60054581c34c26b236360e89a192a7a6cd53370ac31",
-    "temporal_engine_normalized_sha256": "b10d29c9301e9b9e30190c7f8ed4a6c3ec95421f7a375c70545b1db2b80c5c18",
+    "temporal_engine_normalized_sha256": "84c57c7fa036d1381faeab884d74a489c4e356db62bd9352a3c15d3d6e608075",
     "computational_grid_m": 10,
     "missing_data_policy": "masked predictor pixels are not converted to zero",
     "temporal": {

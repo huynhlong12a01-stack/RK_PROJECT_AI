@@ -41,7 +41,13 @@ reference_min_field_area_ha: 0.10
 reference_inner_buffer_m: 10
 reuse_reference_positive: false
 reference_package: ""
+# Chỉ bật khi chưa có nhãn không-mía đã kiểm chứng. Kết quả là lớp tương đồng
+# dương tính để review, không phải xác suất mía và không được tự đưa vào cLHS.
 allow_positive_only_screening: false
+positive_screening_min_points: 30
+positive_screening_min_complete_fraction: 0.80
+positive_screening_prototypes: 12
+positive_screening_distance_quantile: 0.95
 reference_domain_sample_limit: 2000
 reference_minimum_row_fraction: 0.80
 reference_minimum_predictor_fraction: 0.90

@@ -1,0 +1,10 @@
+# Nguon duy nhat cho CRS, GEE project, grid, buffer ho tro va khoang ngay covariates.
+# Cac tep trong buoc 00/01 se duoc ung dung dong bo tu dong.
+project_id: AKS_BLIND_ROI_TEST
+crs_mode: auto
+crs_epsg: 32649
+resolution_m: 20
+covariate_support_buffer_m: 300
+gee_project_id: rkapp-492504
+sampling_start_date: "2026-01-01"
+sampling_end_date: "2026-04-01"

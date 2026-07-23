@@ -153,7 +153,8 @@ def build_temporal_stack(config: dict[str, Any], roi_geometry: Any) -> tuple[Any
     s1_ready = s1.map(prep_s1)
     images = []
     bands: list[str] = []
-    period_counts = []
+    period_count_requests: dict[str, Any] = {}
+    period_count_records: list[dict[str, str]] = []
     for period in periods:
         start = ee.Date(period["start"])
         end = ee.Date(period["end_exclusive"])
@@ -170,13 +171,20 @@ def build_temporal_stack(config: dict[str, Any], roi_geometry: Any) -> tuple[Any
             ]
         )
         bands.extend(s2_names + [f"S2_count_{suffix}"] + s1_names)
-        period_counts.append(
-            {
-                **period,
-                "s2_scene_count": int(s2_period.size().getInfo()),
-                "s1_scene_count": int(s1_period.size().getInfo()),
-            }
-        )
+        period_count_requests[f"{suffix}_s2"] = s2_period.size()
+        period_count_requests[f"{suffix}_s1"] = s1_period.size()
+        period_count_records.append(dict(period))
+
+    print(f"[GEE] Resolving scene counts for {len(periods)} completed quarters in one request...", flush=True)
+    count_payload = ee.Dictionary(period_count_requests).getInfo()
+    period_counts = [
+        {
+            **period,
+            "s2_scene_count": int(count_payload[f"{period['id']}_s2"]),
+            "s1_scene_count": int(count_payload[f"{period['id']}_s1"]),
+        }
+        for period in period_count_records
+    ]
 
     empty_periods = [
         row["id"] for row in period_counts if row["s2_scene_count"] == 0 or row["s1_scene_count"] == 0

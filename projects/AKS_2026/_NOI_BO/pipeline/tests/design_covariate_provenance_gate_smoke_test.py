@@ -200,7 +200,7 @@ finally:
 
 wrapper_paths = (
     ROOT / "projects" / "AKS_2026" / "_NOI_BO" / "run_design_workflow.ps1",
-    ROOT / "projects" / "PHU_YEN_MOCK" / "_NOI_BO" / "run_design_workflow.ps1",
+    ROOT / "projects" / "AKS_BLIND_ROI_TEST" / "_NOI_BO" / "run_design_workflow.ps1",
     ROOT / "_UNG_DUNG" / "project_template" / "_NOI_BO" / "run_design_workflow.ps1",
 )
 for wrapper_path in wrapper_paths:
@@ -213,7 +213,7 @@ for wrapper_path in wrapper_paths:
 
 interpolation_paths = (
     ROOT / "projects" / "AKS_2026" / "_NOI_BO" / "run_interpolation_workflow.ps1",
-    ROOT / "projects" / "PHU_YEN_MOCK" / "_NOI_BO" / "run_interpolation_workflow.ps1",
+    ROOT / "projects" / "AKS_BLIND_ROI_TEST" / "_NOI_BO" / "run_interpolation_workflow.ps1",
     ROOT / "_UNG_DUNG" / "project_template" / "_NOI_BO" / "run_interpolation_workflow.ps1",
 )
 for interpolation_path in interpolation_paths:
@@ -230,7 +230,7 @@ for interpolation_path in interpolation_paths:
 
 status_paths = (
     ROOT / "projects" / "AKS_2026" / "_NOI_BO" / "status.ps1",
-    ROOT / "projects" / "PHU_YEN_MOCK" / "_NOI_BO" / "status.ps1",
+    ROOT / "projects" / "AKS_BLIND_ROI_TEST" / "_NOI_BO" / "status.ps1",
     ROOT / "_UNG_DUNG" / "project_template" / "_NOI_BO" / "status.ps1",
 )
 for status_path in status_paths:
@@ -240,7 +240,7 @@ for status_path in status_paths:
     assert "raw/PCA/Soil lineage chua duoc xac minh" in status_source
     assert "soilLineageStatus" in status_source
 
-for project in ("AKS_2026", "PHU_YEN_MOCK"):
+for project in ("AKS_2026", "AKS_BLIND_ROI_TEST"):
     source = (
         ROOT / "projects" / project / "_NOI_BO" / "pipeline" / "run_download_clhs.py"
     ).read_text(encoding="utf-8")
@@ -258,7 +258,7 @@ for project in ("AKS_2026", "PHU_YEN_MOCK"):
 # omitted gee_project_id, which failed as soon as the support module was loaded.
 downloaders = (
     ROOT / "projects" / "AKS_2026" / "_NOI_BO" / "pipeline" / "download_sampling_satellite.py",
-    ROOT / "projects" / "PHU_YEN_MOCK" / "_NOI_BO" / "pipeline" / "download_sampling_satellite.py",
+    ROOT / "projects" / "AKS_BLIND_ROI_TEST" / "_NOI_BO" / "pipeline" / "download_sampling_satellite.py",
     ROOT / "_UNG_DUNG" / "project_template" / "_NOI_BO" / "pipeline" / "download_sampling_satellite.py",
 )
 for downloader in downloaders:

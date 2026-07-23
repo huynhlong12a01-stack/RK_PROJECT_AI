@@ -122,7 +122,7 @@ finally:
 
 preflight_files = (
     ROOT / "projects" / "AKS_2026" / "_NOI_BO" / "pipeline" / "preflight_actual.R",
-    ROOT / "projects" / "PHU_YEN_MOCK" / "_NOI_BO" / "pipeline" / "preflight_actual.R",
+    ROOT / "projects" / "AKS_BLIND_ROI_TEST" / "_NOI_BO" / "pipeline" / "preflight_actual.R",
     ROOT / "_UNG_DUNG" / "project_template" / "_NOI_BO" / "pipeline" / "preflight_actual.R",
 )
 for preflight_file in preflight_files:

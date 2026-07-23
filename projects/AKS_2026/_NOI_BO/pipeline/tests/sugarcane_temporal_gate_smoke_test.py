@@ -31,4 +31,7 @@ assert MODULE.phenology_gate({"phenology_alignment_confirmed": False})["pass"] i
 assert MODULE.phenology_gate(
     {"phenology_alignment_confirmed": True, "crop_calendar_source": "local agronomy record"}
 )["pass"] is True
+source = SCRIPT.read_text(encoding="utf-8")
+assert ".size().getInfo()" not in source
+assert "ee.Dictionary(period_count_requests).getInfo()" in source
 print("[OK] sugarcane temporal/phenology gates passed")

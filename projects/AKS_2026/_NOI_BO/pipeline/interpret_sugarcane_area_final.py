@@ -30,6 +30,7 @@ def load(name: str, path: Path):
 
 TEMPORAL = load("sugarcane_temporal_final", HERE / "sugarcane_temporal_features.py")
 REUSE = load("sugarcane_reference_reuse_final", HERE / "sugarcane_reference_reuse.py")
+POSITIVE_SCREEN = load("sugarcane_positive_screen_final", HERE / "positive_only_screening.py")
 CORE = load("sugarcane_field_area_core_final", HERE / "interpret_sugarcane_area.py")
 CORE.DEFAULTS.update(
     {
@@ -38,6 +39,11 @@ CORE.DEFAULTS.update(
         "phenology_alignment_confirmed": False,
         "crop_calendar_source": "",
         "crop_calendar_note": "",
+        "allow_positive_only_screening": False,
+        "positive_screening_min_points": 30,
+        "positive_screening_min_complete_fraction": 0.80,
+        "positive_screening_prototypes": 12,
+        "positive_screening_distance_quantile": 0.95,
     }
 )
 CORE.METHOD_ID = "sentinel1_sentinel2_rolling_temporal_random_forest_spatial_holdout_v2"
@@ -82,6 +88,32 @@ def run_supervised(paths, roi_path, label_path, config, config_path, preflight_o
             temporal_provenance=temporal,
             required_action="Confirm the local crop calendar and document crop_calendar_source.",
         )
+    labels = CORE.read_labels(
+        Path(label_path),
+        int(config["crs_epsg"]),
+        float(config["spatial_block_m"]),
+        int(config["spatial_folds"]),
+        int(config["random_seed"]),
+    )
+    local_classes = set(labels["label"].unique())
+    if local_classes == {1} and bool(config.get("allow_positive_only_screening", False)):
+        if bool(config.get("reuse_reference_positive", False)):
+            return blocked(
+                paths,
+                "BLOCKED_REFERENCE_DIRECT_SCREENING_PROHIBITED",
+                direct_inference_allowed=False,
+                required_action="Use only local positive observations for positive-only screening.",
+            )
+        return POSITIVE_SCREEN.run(
+            CORE,
+            paths,
+            Path(roi_path),
+            Path(label_path),
+            labels,
+            config,
+            config_path,
+            preflight_only,
+        )
     if bool(config.get("reuse_reference_positive", False)):
         package = str(config.get("reference_package", "")).strip()
         if not package:
@@ -91,14 +123,7 @@ def run_supervised(paths, roi_path, label_path, config, config_path, preflight_o
                 direct_inference_allowed=False,
                 required_role="TRAIN_ONLY_EXTERNAL_REFERENCE",
             )
-        labels = CORE.read_labels(
-            Path(label_path),
-            int(config["crs_epsg"]),
-            float(config["spatial_block_m"]),
-            int(config["spatial_folds"]),
-            int(config["random_seed"]),
-        )
-        local_classes = set(labels["label"].unique())
+
         transfer = REUSE.reference_reuse_preflight(
             package,
             feature_schema(config),

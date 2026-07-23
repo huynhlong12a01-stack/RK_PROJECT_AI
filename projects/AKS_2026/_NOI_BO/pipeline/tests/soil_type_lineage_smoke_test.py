@@ -86,7 +86,7 @@ finally:
         path.unlink()
     fixture.rmdir()
 
-for project in ("AKS_2026", "PHU_YEN_MOCK"):
+for project in ("AKS_2026", "AKS_BLIND_ROI_TEST"):
     project_pipeline = ROOT / "projects" / project / "_NOI_BO" / "pipeline"
     design_source = (project_pipeline / "prepare_clhs_soil.py").read_text(encoding="utf-8")
     interpolation_source = (project_pipeline / "02b_prepare_soil_predictors_v2.py").read_text(encoding="utf-8")
@@ -103,7 +103,7 @@ for project in ("AKS_2026", "PHU_YEN_MOCK"):
 
 for wrapper in (
     ROOT / "projects" / "AKS_2026" / "_NOI_BO" / "run_interpolation_workflow.ps1",
-    ROOT / "projects" / "PHU_YEN_MOCK" / "_NOI_BO" / "run_interpolation_workflow.ps1",
+    ROOT / "projects" / "AKS_BLIND_ROI_TEST" / "_NOI_BO" / "run_interpolation_workflow.ps1",
     ROOT / "_UNG_DUNG" / "project_template" / "_NOI_BO" / "run_interpolation_workflow.ps1",
 ):
     source = wrapper.read_text(encoding="utf-8")

@@ -185,7 +185,7 @@ run_privacy_fixture()
 
 for relative in (
     "projects/AKS_2026/_NOI_BO/run_interpolation_workflow.ps1",
-    "projects/PHU_YEN_MOCK/_NOI_BO/run_interpolation_workflow.ps1",
+    "projects/AKS_BLIND_ROI_TEST/_NOI_BO/run_interpolation_workflow.ps1",
     "_UNG_DUNG/project_template/_NOI_BO/run_interpolation_workflow.ps1",
 ):
     text = (ROOT / relative).read_text(encoding="utf-8")
@@ -196,7 +196,7 @@ for relative in (
 
 for relative in (
     "projects/AKS_2026/_NOI_BO/pipeline/preflight_actual.R",
-    "projects/PHU_YEN_MOCK/_NOI_BO/pipeline/preflight_actual.R",
+    "projects/AKS_BLIND_ROI_TEST/_NOI_BO/pipeline/preflight_actual.R",
     "_UNG_DUNG/project_template/_NOI_BO/pipeline/preflight_actual.R",
 ):
     text = (ROOT / relative).read_text(encoding="utf-8")

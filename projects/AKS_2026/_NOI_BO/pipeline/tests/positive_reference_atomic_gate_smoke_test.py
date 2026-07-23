@@ -83,6 +83,33 @@ table = gpd.GeoDataFrame(
     crs="EPSG:4326",
 )
 table.to_file(reference, driver="GeoJSON")
+materialized = table.copy()
+materialized["reference_id"] = ["AKS_POS_0001", "AKS_POS_0002", "AKS_POS_0003"]
+coordinates = {
+    row.reference_id: (float(row.geometry.x), float(row.geometry.y))
+    for row in materialized[["reference_id", "geometry"]].itertuples(index=False)
+}
+returned = {
+    "AKS_POS_0001": {
+        "reference_id": "AKS_POS_0001",
+        "lon": 108.0,
+        "lat": 14.0,
+        "label": 1,
+        "evaluation_eligible": False,
+        "source_project": "AKS_2026",
+        "label_basis": "verified",
+        "BAND_A": 1.0,
+        "BAND_B": 2.0,
+    }
+}
+materialized_table, missing = BUILDER.materialize_authorized_rows(
+    materialized, returned, ["BAND_A", "BAND_B"], coordinates
+)
+assert missing == ["AKS_POS_0002", "AKS_POS_0003"]
+assert len(materialized_table) == 3
+assert int(materialized_table["feature_complete"].sum()) == 1
+assert materialized_table.loc[~materialized_table["feature_complete"], ["BAND_A", "BAND_B"]].isna().all().all()
+
 card_path = package / "model_card.json"
 card = {
     "artifact_type": "positive_reference_only",

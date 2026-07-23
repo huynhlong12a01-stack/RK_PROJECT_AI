@@ -1,3 +1,0 @@
-PHU_YEN_MOCK contains synthetic labels, synthetic field geometry and synthetic
-laboratory values. It is not eligible for knowledge indexing, training,
-evaluation, reference reuse or external transfer.

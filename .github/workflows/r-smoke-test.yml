@@ -66,7 +66,7 @@ jobs:
       - name: Parse Python pipelines
         shell: pwsh
         run: |
-          python -m compileall -q _UNG_DUNG/engine _UNG_DUNG/project_template/_NOI_BO/pipeline projects/AKS_2026/_NOI_BO/pipeline projects/PHU_YEN_MOCK/_NOI_BO/pipeline
+          python -m compileall -q _UNG_DUNG/engine _UNG_DUNG/project_template/_NOI_BO/pipeline projects/AKS_2026/_NOI_BO/pipeline projects/AKS_BLIND_ROI_TEST/_NOI_BO/pipeline
 
       - name: Smoke-test project generator and user-facing links
         shell: pwsh
@@ -165,93 +165,10 @@ jobs:
             }
           }
 
-      - name: Check PHU_YEN_MOCK fail-closed safety
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $project = Resolve-Path "projects/PHU_YEN_MOCK"
-          $contract = Get-Content -Raw -LiteralPath (
-            Join-Path $project "MOCK_CONTRACT.json"
-          ) | ConvertFrom-Json
-          if ($contract.project_id -ne "PHU_YEN_MOCK" -or
-              -not $contract.non_operational -or
-              -not $contract.map_use_prohibited -or
-              $contract.knowledge_integration_eligible -or
-              $contract.external_reference_reuse_eligible) {
-            throw "PHU_YEN_MOCK contract is not fail-closed."
-          }
-
-          $bats = Get-ChildItem -LiteralPath $project -Recurse -File -Filter "*.bat"
-          if ($bats.Count -ne 1 -or $bats[0].Name -ne "00_CHAY_MOCK_AN_TOAN.bat") {
-            throw "PHU_YEN_MOCK must expose exactly one safe BAT."
-          }
-          $orchestrator = [IO.File]::ReadAllText(
-            (Join-Path $project "_NOI_BO\run_mock_workflow.ps1")
-          )
-          if (-not $orchestrator.Contains(
-              '$env:RK_PHU_YEN_MOCK_SAFE_RUN = ''orchestrated-v1''') -or
-              -not $orchestrator.Contains(
-              '$env:RK_PHU_YEN_MOCK_SAFE_RUN = $previousMockToken')) {
-            throw "PHU_YEN_MOCK orchestrator token guard is incomplete."
-          }
-          if (-not $orchestrator.Contains('mock_workflow.lock') -or
-              -not $orchestrator.Contains('[IO.FileShare]::None') -or
-              -not $orchestrator.Contains('concurrent writes are blocked')) {
-            throw "PHU_YEN_MOCK concurrent-run lock is incomplete."
-          }
-          if ($orchestrator.Contains('ensure_mock_pca_reference_compat') -or
-              (Test-Path -LiteralPath (Join-Path $project (
-              '_NOI_BO\pipeline\ensure_mock_pca_reference_compat.py')))) {
-            throw "Obsolete PCA reference rewriter must not be present."
-          }
-          foreach ($runnerName in @(
-              "run_interpolation_workflow.ps1", "run_sensitivity_workflow.ps1")) {
-            $runner = [IO.File]::ReadAllText(
-              (Join-Path $project "_NOI_BO\$runnerName")
-            )
-            if (-not $runner.Contains(
-                "RK_PHU_YEN_MOCK_SAFE_RUN -ne 'orchestrated-v1'")) {
-              throw "Missing direct-run guard: $runnerName"
-            }
-          }
-
-          $blocker = Join-Path $project (
-            "_NOI_BO\pipeline\build_positive_feature_library.py"
-          )
-          $previousErrorAction = $ErrorActionPreference
-          $ErrorActionPreference = "Continue"
-          $blockerOutput = & python $blocker --project-dir $project 2>&1
-          $blockerExit = $LASTEXITCODE
-          $ErrorActionPreference = $previousErrorAction
-          if ($blockerExit -ne 2 -or
-              (($blockerOutput | Out-String) -notmatch "\[BLOCKED\]")) {
-            throw "Synthetic-reference blocker did not fail closed."
-          }
-          # GitHub's pwsh wrapper propagates LASTEXITCODE after the script.
-          # The expected fail-closed exit was validated above, so consume it.
-          $global:LASTEXITCODE = 0
-
-          $runtimeManifest = Join-Path $project "MOCK_RUN_MANIFEST.json"
-          $runtimeGate = Join-Path $project (
-            "02_NOI_SUY_BAN_DO\02_KET_QUA\" +
-            "MOCK_SYNTHETIC_NOT_FOR_USE\MOCK_QA_GATE.json"
-          )
-          if ((Test-Path -LiteralPath $runtimeManifest) -and
-              (Test-Path -LiteralPath $runtimeGate)) {
-            python (
-              Join-Path $project "_NOI_BO\pipeline\tests\mock_safety_smoke_test.py"
-            )
-            if ($LASTEXITCODE -ne 0) {
-              throw "PHU_YEN_MOCK runtime safety smoke test failed."
-            }
-          } else {
-            Write-Host "Runtime mock artifacts are intentionally absent in CI; static fail-closed gates passed."
-          }
-
       - name: Parse shared R engine
         shell: pwsh
         run: |
-          Rscript -e "roots <- c('_UNG_DUNG/engine/scripts','_UNG_DUNG/project_template/_NOI_BO/pipeline','projects/AKS_2026/_NOI_BO/pipeline','projects/PHU_YEN_MOCK/_NOI_BO/pipeline'); files <- c(unlist(lapply(roots, list.files, pattern='\\.R$', full.names=TRUE)), '_UNG_DUNG/engine/rk_evaluation/evaluation.R', '_UNG_DUNG/engine/config/evaluation_profiles.R'); invisible(lapply(files[file.exists(files)], parse))"
+          Rscript -e "roots <- c('_UNG_DUNG/engine/scripts','_UNG_DUNG/project_template/_NOI_BO/pipeline','projects/AKS_2026/_NOI_BO/pipeline','projects/AKS_BLIND_ROI_TEST/_NOI_BO/pipeline'); files <- c(unlist(lapply(roots, list.files, pattern='\\.R$', full.names=TRUE)), '_UNG_DUNG/engine/rk_evaluation/evaluation.R', '_UNG_DUNG/engine/config/evaluation_profiles.R'); invisible(lapply(files[file.exists(files)], parse))"
 
       - name: Check lightweight dependency profiles
         shell: pwsh
@@ -288,6 +205,7 @@ jobs:
           python projects/AKS_2026/_NOI_BO/pipeline/tests/sugarcane_temporal_gate_smoke_test.py
           python projects/AKS_2026/_NOI_BO/pipeline/tests/sugarcane_transfer_gate_smoke_test.py
           python projects/AKS_2026/_NOI_BO/pipeline/tests/reference_train_only_integration_smoke_test.py
+          python projects/AKS_2026/_NOI_BO/pipeline/tests/positive_only_screening_smoke_test.py
 
       - name: Run safe AKS knowledge gates
         shell: pwsh

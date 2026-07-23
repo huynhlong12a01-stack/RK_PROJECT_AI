@@ -163,7 +163,7 @@ try {
   }
   $sourceSpecificReference = Get-ChildItem -LiteralPath $staging -Recurse -File |
     Where-Object { $_.Extension -in $textExtensions } |
-    Select-String -Pattern "AKS_2026|PHU_YEN_MOCK" -List
+    Select-String -Pattern "AKS_2026|AKS_BLIND_ROI_TEST" -List
   if ($sourceSpecificReference) {
     throw "Project template con tham chieu du an nguon: $($sourceSpecificReference[0].Path)"
   }

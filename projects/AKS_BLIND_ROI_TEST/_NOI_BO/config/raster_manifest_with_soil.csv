@@ -1,0 +1,8 @@
+layer,file,type,resampling,provenance
+PC1,PC1.tif,continuous,bilinear,PCA workflow 1 reference
+PC2,PC2.tif,continuous,bilinear,PCA workflow 1 reference
+PC3,PC3.tif,continuous,bilinear,PCA workflow 1 reference
+PC4,PC4.tif,continuous,bilinear,PCA workflow 1 reference
+PC5,PC5.tif,continuous,bilinear,PCA workflow 1 reference
+SoilDummy_Fa,SoilDummy_Fa.tif,categorical,near,Ma1 reference-dummy encoding
+SoilDummy_Other,SoilDummy_Other.tif,categorical,near,Ma1 reference-dummy encoding

@@ -8,6 +8,8 @@ AKS đã được cung cấp ranh giới vùng mía đáng tin cậy. Chạy `00
 
 Ranh giới AKS chỉ tạo gói `positive_reference_only`: có bằng chứng dương tính nhưng không có lớp không-mía đã kiểm chứng. Đây không phải mô hình nhị phân tiền huấn luyện để áp trực tiếp sang huyện/tỉnh khác.
 
+Thư viện đặc trưng riêng tư hiện có 1.000 hàng, trong đó 975 hàng đủ đúng 75 predictor và 25 hàng bị mask được giữ dưới dạng NA, không điền 0. Bản knowledge không chứa tọa độ/hình học, dùng 8 prototype và chỉ được phép bổ sung tập train sau các cổng schema, phenology, nhãn địa phương và miền môi trường.
+
 Với dự án chưa có ROI, cần `roi_search.geojson`, nhãn địa phương có cả `label=1`/`label=0`, xác nhận lịch thời vụ và review thủ công `roi_field_area_candidate`.
 
 ## 1. Thiết kế lấy mẫu

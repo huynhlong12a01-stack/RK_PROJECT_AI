@@ -100,6 +100,43 @@ def require_authorized_context(project: Path, reference_path: Path, references: 
     return context
 
 
+def materialize_authorized_rows(
+    references: gpd.GeoDataFrame,
+    by_identifier: dict[str, dict],
+    bands: list[str],
+    local_coordinates: dict[str, tuple[float, float]],
+) -> tuple[pd.DataFrame, list[str]]:
+    """Keep every authorized reference; represent GEE-masked rows as NA, never zero."""
+    expected_ids = references["reference_id"].astype(str).tolist()
+    unexpected = sorted(set(by_identifier).difference(expected_ids))
+    if unexpected:
+        raise RuntimeError(f"GEE returned unauthorized reference identifiers: {unexpected[:3]}")
+    missing_ids = sorted(set(expected_ids).difference(by_identifier))
+    metadata = references.set_index("reference_id", drop=False)
+    rows: list[dict] = []
+    for identifier in expected_ids:
+        if identifier in by_identifier:
+            row = dict(by_identifier[identifier])
+        else:
+            source = metadata.loc[identifier]
+            lon, lat = local_coordinates[identifier]
+            row = {
+                "reference_id": identifier,
+                "lon": lon,
+                "lat": lat,
+                "label": 1,
+                "evaluation_eligible": False,
+                "source_project": source.get("source_project", "AKS_2026"),
+                "label_basis": source.get("label_basis", "inside_confirmed_field_area"),
+                **{band: None for band in bands},
+            }
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    table[bands] = table[bands].apply(pd.to_numeric, errors="coerce")
+    table["feature_complete"] = table[bands].notna().all(axis=1)
+    return table, missing_ids
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project-dir", required=True)
@@ -204,17 +241,13 @@ def main() -> int:
             row[band] = props.get(band)
         by_identifier[identifier] = row
 
-    expected_ids = references["reference_id"].tolist()
-    missing_ids = sorted(set(expected_ids).difference(by_identifier))
-    if missing_ids:
-        raise RuntimeError(
-            f"GEE did not return all authorized references ({len(missing_ids)} missing); no partial library is written"
-        )
-    rows = [by_identifier[identifier] for identifier in expected_ids]
-    table = pd.DataFrame(rows)
-    table[bands] = table[bands].apply(pd.to_numeric, errors="coerce")
-    complete = table[bands].notna().all(axis=1)
-    table["feature_complete"] = complete
+    table, missing_ids = materialize_authorized_rows(
+        references,
+        by_identifier,
+        list(bands),
+        local_coordinates,
+    )
+    complete = table["feature_complete"]
     complete_fraction = float(complete.mean()) if len(complete) else 0.0
     minimum_complete = float(contract.get("minimum_feature_complete_fraction", 1.0))
     if complete_fraction < minimum_complete:
@@ -243,6 +276,9 @@ def main() -> int:
         "target_year": int(config["target_year"]),
         "scene_counts": scene_counts,
         "features": summaries,
+        "n_authorized_references": int(len(references)),
+        "n_masked_or_unsampled": int(len(missing_ids)),
+        "missing_predictor_policy": "NA; never filled with zero",
     }
     snapshot_path = package / "extraction_contract_snapshot.json"
     core.write_json(domain_path, domain)
@@ -279,6 +315,8 @@ def main() -> int:
         "n_reference_points": int(len(references)),
         "n_rows": int(len(table)),
         "n_complete": int(complete.sum()),
+        "n_masked_or_unsampled": int(len(missing_ids)),
+        "missing_predictor_policy": "NA; never filled with zero",
         "complete_fraction": complete_fraction,
         "predictor_band_count": len(bands),
         "scene_counts": scene_counts,

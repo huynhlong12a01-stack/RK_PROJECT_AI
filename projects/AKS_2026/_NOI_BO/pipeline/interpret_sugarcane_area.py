@@ -695,11 +695,15 @@ def download_gee_tiled(image: Any, roi_gdf: gpd.GeoDataFrame, path: Path, scale:
     tiles = [tile for tile in tile_boxes(list(roi_wgs.total_bounds), tile_km) if tile.intersects(roi_union)]
     if not tiles:
         raise ValueError("ROI search does not intersect any export tile")
+    print(f"[GEE] Downloading {path.name} in {len(tiles)} tiles...", flush=True)
+    progress_step = max(1, len(tiles) // 10)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_paths: list[Path] = []
     with tempfile.TemporaryDirectory(prefix="sugarcane_gee_") as temp_dir_raw:
         temp_dir = Path(temp_dir_raw)
         for index, tile in enumerate(tiles):
+            if index % progress_step == 0 or index + 1 == len(tiles):
+                print(f"[GEE] {path.name}: tile {index + 1}/{len(tiles)}", flush=True)
             geom = ee.Geometry(mapping(tile.intersection(roi_union)))
             url = image.clip(geom).getDownloadURL(
                 {"scale": scale, "region": geom, "format": "GEO_TIFF", "crs": "EPSG:4326"}
@@ -1125,7 +1129,13 @@ def main() -> int:
         args.preflight_only,
     )
     print(f"[{qa['status']}] See: {paths.result / 'field_area_QA.json'}")
-    return 0 if qa["status"] in {"PREFLIGHT_READY", "CANDIDATE_REQUIRES_MANUAL_REVIEW"} else 2
+    successful_statuses = {
+        "PREFLIGHT_READY",
+        "CANDIDATE_REQUIRES_MANUAL_REVIEW",
+        "POSITIVE_ONLY_PREFLIGHT_READY",
+        "POSITIVE_ONLY_CANDIDATE_REQUIRES_MANUAL_REVIEW",
+    }
+    return 0 if qa["status"] in successful_statuses else 2
 
 
 if __name__ == "__main__":

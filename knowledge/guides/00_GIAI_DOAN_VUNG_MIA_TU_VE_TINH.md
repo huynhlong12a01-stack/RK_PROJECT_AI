@@ -49,6 +49,14 @@ Nguồn:
 - [Valavi et al. (2019), blockCV](https://doi.org/10.1111/2041-210X.13107)
 - [Olofsson et al. (2014), good practices for accuracy and area estimation](https://doi.org/10.1016/j.rse.2014.02.015)
 
+## Sàng lọc khi chỉ có điểm mía dương tính
+
+Khi chỉ có vị trí mía đã kiểm chứng, ứng dụng không thể học ranh giới quyết định mía/không-mía. Chế độ `allow_positive_only_screening` chỉ đo mức hỗ trợ/tương đồng đa biến với các điểm dương theo fold không gian và xuất lớp ứng viên để review.
+
+Điểm hỗ trợ không phải xác suất mía. Không được tính precision, recall, F1 hoặc accuracy; không dùng điểm nền ngẫu nhiên hay WorldCover làm nhãn âm; không tự nâng candidate thành `roi_field_area` hoặc chuyển sang cLHS. Để lập bản đồ phân loại có đánh giá sai số vẫn cần nhãn dương/âm địa phương và mẫu đánh giá phù hợp.
+
+Để tránh tính và tải GEE hai lần, phiên bản v2 tải một raster điểm hỗ trợ rồi hậu xử lý mask cục bộ bằng kernel tròn bán kính 1 pixel và lọc vùng liên thông. Trên phép thử AKS 20 m, mask cục bộ đạt IoU 0,99993 so với mask GEE đầy đủ; đây là kiểm tra tương đương tính toán, không phải độ chính xác phân loại.
+
 ## 5. Chỉ số cần báo cáo
 
 Với lớp mía, chỉ overall accuracy có thể cao dù bỏ sót nhiều mía khi lớp này hiếm. Báo ít nhất:
@@ -77,6 +85,8 @@ Một model package chỉ được xem xét tái sử dụng khi khớp:
 - kiểm tra applicability/domain tại dự án mới.
 
 Ngay cả khi khớp, model cũ chỉ nên khởi tạo hoặc bổ sung training. Dự án mới vẫn cần nhãn địa phương ở cả hai lớp và outer spatial test tại địa phương. ROI AKS_2026 hiện được lưu là `positive_reference_only`, không được tuyên bố là pretrained model tổng quát.
+
+Gói AKS cục bộ hiện giữ 1.000 hàng tham chiếu: 975 hàng hoàn chỉnh cho 75 predictor và 25 hàng thiếu do mask được biểu diễn bằng NA, không bao giờ điền 0. Knowledge xuất ra đã loại tọa độ/hình học và tạo 8 prototype từ các hàng hoàn chỉnh; các con số này mô tả miền lớp dương, không phải mô hình mía/không-mía.
 
 ## 7. Hậu xử lý và phê duyệt
 
