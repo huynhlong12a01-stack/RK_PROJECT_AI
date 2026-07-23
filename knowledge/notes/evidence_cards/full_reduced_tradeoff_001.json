@@ -1,0 +1,19 @@
+{
+  "claim_id": "full_reduced_tradeoff_001",
+  "claim": "A nested reduced and full sampling plan supports staged field work, but fewer samples do not guarantee equivalent mapping or variogram performance; both alternatives require separate feature-space and spatial QA.",
+  "applies_to": [
+    "sample_design",
+    "nested_sample_plan",
+    "variogram",
+    "spatial_balance"
+  ],
+  "evidence_sources": [
+    "brus_2019_sampling_dsm",
+    "fao_2022_gsnmap"
+  ],
+  "strength": "moderate",
+  "conditions": "The reduced plan is a strict subset of the full plan; added full-plan locations target spatial infill or short lags.",
+  "limitations": "The value of added samples depends on target variability, laboratory quality, access constraints and the eventual model.",
+  "recommended_action": "Report sample count, soil-class proportions, covariate quantile coverage, maximum spatial gaps, nearest-neighbour distances and pair-distance distributions for both plans.",
+  "not_allowed_action": "Do not state that the reduced plan guarantees the same map quality as the full plan."
+}

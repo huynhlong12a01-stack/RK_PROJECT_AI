@@ -1,0 +1,41 @@
+{
+  "schema_version": "aks-blind-roi-test-v2",
+  "project_id": "AKS_BLIND_ROI_TEST",
+  "purpose": "Reconstruct a sugarcane candidate boundary from the approved 1,000 AKS positive points without supplying the known field-area polygon to inference.",
+  "test_only": true,
+  "operational_use_prohibited": true,
+  "knowledge_integration_eligible": false,
+  "inference_contract": {
+    "known_roi_field_area_geometry_allowed": false,
+    "sample_actual_used": false,
+    "approved_positive_reference_points": 1000,
+    "reference_receipt_required": "PASS_ATOMIC_BEFORE_EXTERNAL_TRANSFER",
+    "verified_negative_labels_available": false,
+    "random_or_landcover_background_as_negative_allowed": false,
+    "product": "positive_class_support_score_and_candidate",
+    "product_is_probability": false,
+    "product_is_validated_binary_crop_map": false,
+    "automatic_sample_design_allowed": false
+  },
+  "search_extent": {
+    "method": "convex_hull_of_approved_1000_positive_points_buffered_in_projected_crs",
+    "buffer_m": 5000,
+    "independent_of_source_roi": false,
+    "warning": "The 1,000 points were selected from the known AKS field-area source; this is reconstruction, not independent validation."
+  },
+  "computational_profile": {
+    "resolution_m": 20,
+    "tile_km": 5,
+    "positive_prototypes": 8,
+    "candidate_postprocessing": "local_from_positive_support_score_v2",
+    "full_gee_mask_equivalence_iou": 0.9999278418025368,
+    "reason": "Regional screening uses the native 20 m support of key Sentinel-2 red-edge/SWIR predictors and smaller tiles to avoid synchronous-download timeouts.",
+    "field_boundary_accuracy_at_resolution_claimed": false
+  },
+  "withheld_comparison": {
+    "performed_only_after_candidate_creation": true,
+    "reference_role": "post_hoc_geometric_comparison_only",
+    "classification_accuracy_claim_allowed": false,
+    "independent_validation_claim_allowed": false
+  }
+}

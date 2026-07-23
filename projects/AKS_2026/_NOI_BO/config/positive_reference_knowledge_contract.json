@@ -1,0 +1,107 @@
+{
+  "contract_version": "2.0.1",
+  "package_id": "AKS_2026_positive_temporal_reference_v2",
+  "artifact_semantics": "positive_reference_only",
+  "source_project": "AKS_2026",
+  "maximum_reference_points": 1000,
+  "minimum_feature_complete_fraction": 0.9,
+  "required_schema_version": "sugarcane-field-area-v1",
+  "required_method_id": "sentinel1_sentinel2_rolling_temporal_random_forest_spatial_holdout_v2",
+  "prototype_count": 8,
+  "private_package_relative_path": "knowledge-private/sugarcane/AKS_2026/positive_reference_v1",
+  "required_feature_contract": {
+    "predictor_band_count": 75,
+    "feature_schema_semantic_sha256": "5e9d72d6c13b45877824c60054581c34c26b236360e89a192a7a6cd53370ac31",
+    "temporal_engine_normalized_sha256": "84c57c7fa036d1381faeab884d74a489c4e356db62bd9352a3c15d3d6e608075",
+    "computational_grid_m": 10,
+    "missing_data_policy": "masked predictor pixels are not converted to zero",
+    "temporal": {
+      "period_definition": "rolling_complete_calendar_quarters",
+      "feature_end_date_exclusive": "2026-07-01",
+      "n_periods": 8,
+      "periods": [
+        {"id": "T01", "start": "2024-07-01", "end_exclusive": "2024-10-01"},
+        {"id": "T02", "start": "2024-10-01", "end_exclusive": "2025-01-01"},
+        {"id": "T03", "start": "2025-01-01", "end_exclusive": "2025-04-01"},
+        {"id": "T04", "start": "2025-04-01", "end_exclusive": "2025-07-01"},
+        {"id": "T05", "start": "2025-07-01", "end_exclusive": "2025-10-01"},
+        {"id": "T06", "start": "2025-10-01", "end_exclusive": "2026-01-01"},
+        {"id": "T07", "start": "2026-01-01", "end_exclusive": "2026-04-01"},
+        {"id": "T08", "start": "2026-04-01", "end_exclusive": "2026-07-01"}
+      ],
+      "relative_band_suffixes": true,
+      "future_or_partial_periods_included": false
+    },
+    "band_layout": {
+      "per_period_prefixes": ["NDVI", "EVI", "NDMI", "NDRE", "NBR2", "S2_count", "VV", "VH", "VVminusVH"],
+      "ancillary_bands": ["elevation_m", "slope_deg", "worldcover_class"]
+    },
+    "sentinel_2": {
+      "collection": "COPERNICUS/S2_SR_HARMONIZED",
+      "quality_collection": "GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED",
+      "surface_reflectance_scale_factor": 0.0001,
+      "cloudy_scene_percentage_lt": 80,
+      "cloud_score_band": "cs_cdf",
+      "cloud_score_threshold": 0.6,
+      "source_bands": ["B2", "B3", "B4", "B5", "B8", "B11", "B12"],
+      "period_features": ["NDVI", "EVI", "NDMI", "NDRE", "NBR2", "valid_count"],
+      "period_reducers": {
+        "NDVI": "median",
+        "EVI": "median",
+        "NDMI": "median",
+        "NDRE": "median",
+        "NBR2": "median",
+        "S2_count": "count of clear NDVI observations"
+      },
+      "index_formulas": {
+        "NDVI": "(B8-B4)/(B8+B4)",
+        "EVI": "2.5*(B8-B4)/(B8+6*B4-7.5*B2+1)",
+        "NDMI": "(B8-B11)/(B8+B11)",
+        "NDRE": "(B8-B5)/(B8+B5)",
+        "NBR2": "(B11-B12)/(B11+B12)"
+      }
+    },
+    "sentinel_1": {
+      "collection": "COPERNICUS/S1_GRD",
+      "input_unit": "dB",
+      "additional_log_transform": false,
+      "filters": {"instrumentMode": "IW", "polarizations": ["VV", "VH"]},
+      "period_features": ["VV_median_dB", "VH_median_dB", "VV_minus_VH_dB"],
+      "period_reducer": "median in dB",
+      "formula": {"VVminusVH": "VV_dB - VH_dB"}
+    },
+    "ancillary": {
+      "schema": {
+        "worldcover": {"collection": "ESA/WorldCover/v200", "role": "predictor_only_not_hard_mask"},
+        "topography": "USGS/SRTMGL1_003"
+      },
+      "formulas_and_units": {
+        "elevation_m": "SRTM elevation, metre",
+        "slope_deg": "ee.Terrain.slope(SRTM elevation), degree",
+        "worldcover_class": "ESA WorldCover categorical Map value"
+      }
+    }
+  },
+  "coordinate_policy": {
+    "raw_coordinates_remain_in_project_work_only": true,
+    "coordinate_columns_are_removed_from_knowledge_table": true,
+    "source_geometry_is_not_copied": true,
+    "raw_reference_identifiers_are_rekeyed": true,
+    "forbidden_columns_case_insensitive": ["lon", "lng", "longitude", "lat", "latitude", "geometry", "wkt", "x", "y", "easting", "northing", "bbox", "geohash"],
+    "forbidden_name_substrings_case_insensitive": ["longitude", "latitude", "geometry", "coordinate", "centroid", "easting", "northing", "geohash", "bounding_box", "bbox"],
+    "forbidden_name_tokens_case_insensitive": ["lon", "lng", "lat", "wkt", "geom", "x", "y"]
+  },
+  "allowed_use": [
+    "inspect the AKS positive-class environmental domain",
+    "augment only the training fold after a target project supplies verified local positive and negative labels",
+    "compare target environmental support against the AKS positive-class domain"
+  ],
+  "prohibited_use": [
+    "direct sugarcane inference in another province",
+    "threshold calibration or model testing",
+    "automatic promotion of a candidate map to roi_field_area",
+    "claims of transferability outside AKS without local spatial validation",
+    "ingestion of mock, synthetic or non-operational data"
+  ],
+  "public_contract_contains_coordinates": false
+}

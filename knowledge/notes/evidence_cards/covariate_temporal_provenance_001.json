@@ -1,0 +1,21 @@
+{
+  "claim_id": "covariate_temporal_provenance_001",
+  "claim": "Remote-sensing and climate covariates are reproducible only when collection ID, date range, aggregation, cloud-quality rule, missing-data handling and exported asset version are recorded.",
+  "applies_to": [
+    "covariate_acquisition",
+    "remote_sensing_covariates",
+    "climate_covariates",
+    "data_provenance"
+  ],
+  "evidence_sources": [
+    "google_s2_sr_harmonized_catalog",
+    "google_cloud_score_plus_catalog",
+    "google_chirps_daily_catalog",
+    "gorelick_2017_gee"
+  ],
+  "strength": "strong",
+  "conditions": "NDVI is a date-window composite from Sentinel-2 surface reflectance and CHIRPS is aggregated over a specified interval.",
+  "limitations": "A composite can hide seasonal variation and may not align with the soil sampling date.",
+  "recommended_action": "Save the Earth Engine collection IDs, start/end dates, cs or cs_cdf threshold, reducer, projection, scale and export date in the project QA manifest.",
+  "not_allowed_action": "Do not label a covariate simply NDVI or rainfall without temporal and processing provenance."
+}

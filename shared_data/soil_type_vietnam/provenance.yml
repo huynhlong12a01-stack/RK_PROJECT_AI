@@ -1,0 +1,26 @@
+schema_version: 1
+dataset_id: vietnam_soil_type_user_provided
+local_file: shared_data/soil_type_vietnam/raw/VN_soil_type.geojson
+file_size_bytes: 1546618877
+sha256: 290aa8ae68327a049e85bb10dff6518642e157c453a599127301fbb1a9be1423
+file_last_modified_local: "2026-04-23T08:51:00"
+registered_in_application_date: "2026-07-16"
+
+source:
+  organization: null
+  dataset_title: null
+  version: null
+  access_date: null
+  license: null
+  status: USER_DOCUMENTATION_REQUIRED
+
+application_use:
+  role: optional_nominal_soil_type_covariate
+  group_field: Ma1
+  raw_file_committed_to_git: false
+  local_processing_allowed: true
+  external_publication_status: BLOCKED_UNTIL_SOURCE_AND_LICENSE_ARE_DOCUMENTED
+
+integrity_note: >-
+  The SHA-256 identifies the exact user-provided local file. It does not establish
+  scientific authority, currency, ownership, or a license.

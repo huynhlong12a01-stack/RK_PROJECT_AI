@@ -1,0 +1,19 @@
+{
+  "claim_id": "crop_map_candidate_review_accuracy_001",
+  "claim": "A model probability or thresholded crop map is a candidate product, not a verified field-area boundary; defensible map accuracy and area estimation require reference labels and an assessment design consistent with the intended estimand.",
+  "applies_to": [
+    "sugarcane_mapping",
+    "land_cover_accuracy",
+    "area_estimation",
+    "roi_approval"
+  ],
+  "evidence_sources": [
+    "olofsson_etal_2014_accuracy_area",
+    "valavi_2019_blockcv"
+  ],
+  "strength": "strong",
+  "conditions": "Internal spatial holdout can estimate model performance under its split design but does not become independent field validation unless the reference sample was independently designed and collected.",
+  "limitations": "Manual review can improve boundaries but is not a substitute for probability-sample accuracy assessment when unbiased regional area estimates are required.",
+  "recommended_action": "Export probability and candidate layers, report class-specific precision and recall, review boundaries, and approve a separate roi_field_area before sample design.",
+  "not_allowed_action": "Do not automatically pass an unreviewed candidate map into cLHS or report pixel-count area as error-adjusted crop area."
+}

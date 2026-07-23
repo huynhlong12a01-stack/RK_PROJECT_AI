@@ -1,0 +1,19 @@
+{
+  "claim_id": "sentinel1_grd_db_no_double_log_001",
+  "claim": "The Google Earth Engine COPERNICUS/S1_GRD collection is already calibrated, terrain-corrected and log-scaled to decibels, so applying 10*log10 to its VV/VH values again is scientifically incorrect.",
+  "applies_to": [
+    "sugarcane_mapping",
+    "sentinel_1",
+    "google_earth_engine",
+    "sar_preprocessing"
+  ],
+  "evidence_sources": [
+    "gee_copernicus_s1_grd_catalog",
+    "gee_sentinel1_preprocessing_guide"
+  ],
+  "strength": "strong",
+  "conditions": "This statement applies to COPERNICUS/S1_GRD; COPERNICUS/S1_GRD_FLOAT has different value semantics.",
+  "limitations": "Additional speckle filtering or terrain-normalization decisions may still be needed and must be documented separately.",
+  "recommended_action": "Use VV and VH directly as dB values and record additional_log_transform=false in feature provenance.",
+  "not_allowed_action": "Do not apply a second logarithmic conversion to COPERNICUS/S1_GRD."
+}

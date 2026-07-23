@@ -1,0 +1,104 @@
+{
+  "schema_version": "sugarcane-field-area-v1",
+  "method_id": "sentinel1_sentinel2_rolling_temporal_random_forest_spatial_holdout_v2",
+  "sentinel_2": {
+    "collection": "COPERNICUS/S2_SR_HARMONIZED",
+    "quality_collection": "GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED",
+    "surface_reflectance_scale_factor": 0.0001,
+    "cloud_score_band": "cs_cdf",
+    "cloud_score_threshold": 0.6,
+    "period_features": [
+      "NDVI",
+      "EVI",
+      "NDMI",
+      "NDRE",
+      "NBR2",
+      "valid_count"
+    ]
+  },
+  "sentinel_1": {
+    "collection": "COPERNICUS/S1_GRD",
+    "input_unit": "dB",
+    "additional_log_transform": false,
+    "filters": {
+      "instrumentMode": "IW",
+      "polarizations": [
+        "VV",
+        "VH"
+      ]
+    },
+    "period_features": [
+      "VV_median_dB",
+      "VH_median_dB",
+      "VV_minus_VH_dB"
+    ]
+  },
+  "ancillary": {
+    "worldcover": {
+      "collection": "ESA/WorldCover/v200",
+      "role": "predictor_only_not_hard_mask"
+    },
+    "topography": "USGS/SRTMGL1_003"
+  },
+  "missing_data_policy": "masked predictor pixels are not converted to zero",
+  "computational_grid_m": 10,
+  "native_resolution_warning": "A 10 m computational/export cell alone is not evidence that all predictors have 10 m native detail.",
+  "reference_extraction_configuration_year": 2026,
+  "temporal": {
+    "period_definition": "rolling_complete_calendar_quarters",
+    "feature_end_date_exclusive": "2026-07-01",
+    "latest_complete_end_at_run": "2026-07-01",
+    "n_periods": 8,
+    "periods": [
+      {
+        "id": "T01",
+        "start": "2024-07-01",
+        "end_exclusive": "2024-10-01"
+      },
+      {
+        "id": "T02",
+        "start": "2024-10-01",
+        "end_exclusive": "2025-01-01"
+      },
+      {
+        "id": "T03",
+        "start": "2025-01-01",
+        "end_exclusive": "2025-04-01"
+      },
+      {
+        "id": "T04",
+        "start": "2025-04-01",
+        "end_exclusive": "2025-07-01"
+      },
+      {
+        "id": "T05",
+        "start": "2025-07-01",
+        "end_exclusive": "2025-10-01"
+      },
+      {
+        "id": "T06",
+        "start": "2025-10-01",
+        "end_exclusive": "2026-01-01"
+      },
+      {
+        "id": "T07",
+        "start": "2026-01-01",
+        "end_exclusive": "2026-04-01"
+      },
+      {
+        "id": "T08",
+        "start": "2026-04-01",
+        "end_exclusive": "2026-07-01"
+      }
+    ],
+    "relative_band_suffixes": true,
+    "future_or_partial_periods_included": false
+  },
+  "phenology_alignment": {
+    "confirmed": false,
+    "crop_calendar_source": "",
+    "crop_calendar_note": "",
+    "pass": false,
+    "reason": "confirm local crop calendar and document crop_calendar_source before supervised inference"
+  }
+}

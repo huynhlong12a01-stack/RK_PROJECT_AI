@@ -1,0 +1,21 @@
+{
+  "claim_id": "sugarcane_temporal_s1_s2_mapping_001",
+  "claim": "Sugarcane mapping benefits from multi-temporal optical and SAR information because phenological trajectories and harvest/regrowth dynamics can separate sugarcane from spectrally similar vegetation better than a single-date vegetation index.",
+  "applies_to": [
+    "sugarcane_mapping",
+    "sentinel_1",
+    "sentinel_2",
+    "phenology",
+    "crop_classification"
+  ],
+  "evidence_sources": [
+    "jiang_etal_2019_sugarcane_s1_s2",
+    "wang_etal_2020_sugarcane_phenology",
+    "remote_sensing_sugarcane_review_2021"
+  ],
+  "strength": "strong",
+  "conditions": "Temporal windows must be complete, documented and aligned with the local crop calendar; optical observations require cloud and shadow quality control.",
+  "limitations": "Phenology varies with region, cultivar, irrigation, planting date, ratoon status and year, so a model trained in one project is not automatically transferable.",
+  "recommended_action": "Use rolling complete-period Sentinel-1 VV/VH and Sentinel-2 spectral-index features, store exact dates, and confirm local phenology before model fitting.",
+  "not_allowed_action": "Do not infer a general sugarcane signature from one NDVI composite or silently include future/incomplete temporal periods."
+}

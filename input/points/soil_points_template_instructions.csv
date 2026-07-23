@@ -1,7 +1,0 @@
-"item","note"
-"required_columns","code, lat, lon"
-"coordinate_columns","Use the coordinate columns configured in scripts/00_config.R. Do not rename them unless you also update config."
-"indicator_columns","Prefer canonical_column names from the Indicator Profiles sheet/CSV so each soil property uses the correct evaluation profile."
-"missing_values","Leave missing indicator values blank. Do not write text such as NA, none, or '-' inside numeric indicator columns."
-"normal_run","Rscript scripts/main.R runs one target at a time. If TARGET_FIELD is auto and there is only one indicator column, it is selected automatically."
-"batch_agent_run",".\run_agent_batch.ps1 runs all detected indicator columns, or use -Targets ""pH,Humus,CEC"" for selected columns."

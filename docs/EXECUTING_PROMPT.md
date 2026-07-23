@@ -1,215 +1,145 @@
-# EXECUTING PROMPT - R Regression Kriging Agent Workflow
+# Prompt thực thi cho AI agent
 
-Bạn là AI coding agent đang làm việc trực tiếp trong thư mục dự án R Regression Kriging hiện có. Nhiệm vụ là thực thi workflow đã có để chạy RK, kiểm định kết quả, tạo report, đọc JSON output, và nếu cần thì chạy lại có kiểm soát. Không thiết kế lại dự án nếu không cần.
+Tài liệu này dành cho Codex/AI agent khi vận hành một dự án trong RK_R_Project. Luồng chính luôn gồm Bước 0 và hai workflow theo project; các script engine ở root chỉ là hạ tầng kỹ thuật.
 
-## 0. Quy tắc bắt buộc
+## 1. Quy tắc
 
-- Không chuyển sang Python, Flask, Shiny hoặc web server.
-- Không sửa input CSV/raster gốc.
-- Không tự ý thay CRS hoặc đổi tên cột dữ liệu.
-- Không tắt cross-validation để làm kết quả đẹp hơn.
-- Không chọn mô hình chỉ vì RMSE thấp nhất.
-- Không chạy vòng lặp vô hạn.
-- Không hard-code đường dẫn máy cá nhân.
-- Kiểm tra `git status --short` trước và sau khi sửa.
-- Không commit trừ khi người dùng yêu cầu rõ.
+- Không sửa ROI, Soil Type, sample_actual hoặc kết quả lab gốc để làm model đẹp hơn.
+- Không thay tọa độ thực tế bằng tọa độ sample_cLHS.
+- Không xóa mẫu ngoài ROI chỉ dựa vào ranh giới.
+- Không refit PCA trên sample_actual.
+- Không dùng mã Soil Type như biến liên tục.
+- Không tắt cross-validation hoặc scientific gate.
+- Không chọn model chỉ vì RMSE nhỏ nhất.
+- Không gọi outer spatial CV là independent field validation.
+- Không gọi residual kriging SD là total uncertainty.
+- Không tạo ngưỡng dinh dưỡng hoặc liều phân khi thiếu crop, region, method và unit.
+- Không chỉnh thư mục _NOI_BO trừ khi đang sửa lỗi engine có chủ đích.
+- Kiểm tra git status trước và sau; không commit nếu người dùng chưa yêu cầu.
 
-## 1. Đọc file trước khi chạy
+## 2. Chọn dự án
 
-Đọc nếu có:
+Danh sách project nằm trong projects. Với mỗi project, đọc:
 
-```text
-README.md
-AGENT_README.md
-docs/EXECUTING_PROMPT.md
-scripts/00_config.R
-scripts/main.R
-scripts/agent_run.R
-scripts/agent_batch_run.R
-scripts/agent_validate_decision.R
-scripts/agent_compare_runs.R
-scripts/validate_point_schema.R
-rk_evaluation/evaluation.R
-run_agent.ps1
-run_agent_batch.ps1
-validate_point_schema.ps1
-check_dependencies.ps1
-install_dependencies.ps1
-run_rk.bat
-```
+    projects/TEN_DU_AN/README.md
+    projects/TEN_DU_AN/THONG_SO_DU_AN.yml
+    projects/TEN_DU_AN/00_XAC_LAP_VUNG_MIA/HUONG_DAN.md
+    projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/HUONG_DAN.md
+    projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/HUONG_DAN.md
+    projects/TEN_DU_AN/_NOI_BO/config/project.yml
 
-Xác định:
+Đọc thêm:
 
-```text
-Config chính: scripts/00_config.R
-Engine chính: scripts/main.R
-Agent single-run: run_agent.ps1
-Agent batch: run_agent_batch.ps1
-Evaluation: rk_evaluation/evaluation.R
-Request template: agent/requests/run_request_template.json
-Output agent: output/agent_runs/<run_id>/
-JSON response: agent/responses/<run_id>_run_result.json
-```
+    docs/00_MUC_LUC.md
+    docs/SCIENTIFIC_VALIDATION.md
+    knowledge/README.md
+    knowledge/CATALOG.md
 
-## 2. Kiểm tra môi trường
+## 3. Entry point chuẩn
 
-Luôn chạy dependency gate nếu wrapper tồn tại:
+Kiểm tra trạng thái:
 
-```powershell
-.\check_dependencies.ps1 -Profile all
-```
+    powershell -ExecutionPolicy Bypass -File projects/TEN_DU_AN/RUN.ps1 status
 
-Nếu thiếu package và người dùng đã cho phép cài đặt:
+Xác lập vùng mía:
 
-```powershell
-.\install_dependencies.ps1 -Profile "core,rag"
-.\install_dependencies.ps1 -Profile "geostat_extra,spatial_cv,modeling"
-```
+    powershell -ExecutionPolicy Bypass -File projects/TEN_DU_AN/RUN.ps1 interpret
 
-Không tự cài package bằng lệnh rời rạc nếu wrapper còn dùng được.
+Thiết kế mẫu:
 
-## 3. Kiểm tra input
+    powershell -ExecutionPolicy Bypass -File projects/TEN_DU_AN/RUN.ps1 design
 
-Trước khi chạy thật:
+Nội suy:
 
-```powershell
-.\validate_point_schema.ps1
-```
+    powershell -ExecutionPolicy Bypass -File projects/TEN_DU_AN/RUN.ps1 interpolate
 
-Nếu thiếu `POINT_FILE`, thiếu raster `PC*.tif`, hoặc target không tồn tại trong CSV, dừng và báo rõ file/cột nào thiếu.
+Các BAT người dùng nhấp chỉ gọi các action trên; đầu vào và kết quả luôn nằm trong đúng thư mục của từng dự án.
 
-## 4. Chọn workflow
+## 4. Bước 0 và Workflow 1
 
-Ưu tiên batch khi CSV có nhiều chỉ tiêu:
+Bước 0 nhận `roi_field_area.geojson`, hoặc `roi_search.geojson` cùng nhãn dương/âm đã kiểm chứng. Không cho ROI ứng viên chưa review đi tiếp; không coi gói AKS `positive_reference_only` là binary pretrained model; classifier phải qua phenology gate và spatial holdout riêng.
 
-```powershell
-.\run_agent_batch.ps1
-.\run_agent_batch.ps1 -Targets "pH,Humus,CEC"
-```
+Kiểm tra:
 
-Một chỉ tiêu:
+    projects/TEN_DU_AN/THONG_SO_DU_AN.yml
+    projects/TEN_DU_AN/00_XAC_LAP_VUNG_MIA/01_DAU_VAO/roi_field_area.geojson
+    projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/01_DAU_VAO/soil_type.geojson
+    projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/01_DAU_VAO/sampling.yml
 
-```powershell
-.\run_agent.ps1 -Target pH -Request agent\requests\run_request_template.json
-```
+`THONG_SO_DU_AN.yml` là nguồn duy nhất cho CRS, GEE, `resolution_m`, `covariate_support_buffer_m` và ngày covariates. ROI bắt buộc; Soil Type tùy chọn; `sampling.yml` chứa số mẫu, spacing và tham số cLHS. Không coi `THONG_SO_DU_AN.yml` là tệp duy nhất người dùng được sửa.
 
-Workflow thường:
+Sau run, đọc:
 
-```powershell
-.\run_rk.bat
-```
+    projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/02_KET_QUA/sample_cLHS_REDUCED.csv
+    projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/02_KET_QUA/sample_cLHS_FULL.csv
+    projects/TEN_DU_AN/01_THIET_KE_LAY_MAU/02_KET_QUA/sampling_QA.json
 
-Nếu chỉ cần test hạ tầng batch:
+Kiểm tra REDUCED là tập con FULL, mọi điểm trong ROI, mã/tọa độ duy nhất, Soil Type coverage, minimum distance, covariate coverage và provenance.
 
-```powershell
-.\run_agent_batch.ps1 -Targets pH -DryRun
-```
+Ưu tiên lõi CRAN `clhs`. Chỉ `clhs_core` là đầu ra direct optimizer; FULL là hybrid sau spatial augmentation. Nếu fallback `python_clhs_like`, giữ đúng method metadata và lý do. Không hứa REDUCED có chất lượng tương đương FULL.
 
-Dry-run không phải kết quả khoa học.
+## 5. Workflow 2
 
-## 5. Target field
+Đầu vào kết quả mẫu người dùng chỉnh:
 
-Nếu `TARGET_FIELD <- "auto"` và CSV chỉ có một chỉ tiêu, engine có thể tự chọn. Nếu CSV có nhiều chỉ tiêu, không để engine đoán; dùng batch hoặc truyền `-Target` rõ ràng. Khi không rõ target, ưu tiên thử các cột có thật theo thứ tự: `pH`, `Humus`, `CEC`.
+    projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/01_DAU_VAO/sample_actual.csv
+    projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/01_DAU_VAO/indicator_metadata.yml
 
-## 6. Output cần đọc
+Kết quả lab chỉ nằm trong `sample_actual.csv`; `indicator_metadata.yml` chỉ chứa định nghĩa phương pháp/đơn vị. Ba cột bắt buộc là code, lat, lon. Mỗi target phải có số liệu numeric và metadata lab rõ trước khi phát hành.
 
-Sau mỗi run, đọc:
+Preflight cần báo:
 
-```text
-agent/responses/<run_id>_run_result.json
-output/agent_runs/<run_id>/06_report/index_<target>.html
-output/agent_runs/<run_id>/06_report/json/evaluation_<target>.json
-output/agent_runs/<run_id>/06_report/tables/model_comparison_<target>.csv
-output/agent_runs/<run_id>/06_report/tables/cv_results_<target>.csv
-output/agent_runs/<run_id>/06_report/tables/neighbor_tuning_<target>.csv
-output/agent_runs/<run_id>/06_report/interactive/variogram_interactive_<target>.html
-```
+- số dòng/mã trùng;
+- tọa độ ngoài ROI;
+- missing covariates/PCA;
+- nhóm Soil Type và Other;
+- target có dữ liệu, method/unit;
+- trạng thái PCA reference.
 
-Trích xuất: RMSE, MAE, ME, R²_pred, baseline RMSE, variogram model, nugget, sill, range, nugget/sill, range_hit_max, selected_nmax_neighbors, selected_search_radius, warnings, recommendations, missing_outputs.
+Nếu lab còn trống, dừng sau bước chuẩn bị predictor và báo đang chờ lab; đây không phải lỗi.
 
-## 7. Đánh giá khoa học
+Khi chạy model, so PC_ONLY và PC_PLUS_SOIL nếu có. Điểm ngoài ROI có thể tham gia fit sau QA; map cuối mask ROI.
 
-Không chọn mô hình chỉ vì RMSE thấp nhất. Ưu tiên:
+Đọc output công khai:
 
-- R²_pred dương.
-- ME gần 0.
-- RK cải thiện so với regression-only.
-- RK không kém rõ so với Ordinary Kriging.
-- Nugget/Sill không quá cao.
-- Range không chạm max.
-- Practical range không quá dài so với cutoff.
-- Ít cảnh báo nghiêm trọng.
-- Class accuracy hợp lý nếu có phân cấp.
-- Uncertainty hợp lý nếu có.
+    projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/02_KET_QUA/maps
+    projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/02_KET_QUA/reports
+    projects/TEN_DU_AN/02_NOI_SUY_BAN_DO/02_KET_QUA/tables
 
-Nếu dữ liệu là random/test, không cố chứng minh RK tốt; chỉ báo kết quả dùng để kiểm tra workflow.
+Model/log chi tiết ở projects/TEN_DU_AN/_NOI_BO/work chỉ dùng chẩn đoán.
 
-## 8. Quyết định iteration
+## 6. Scientific gate
 
-Chọn một trong:
+Chỉ coi một model đạt Internal QA khi có outer held-out nested spatial CV, target metadata phù hợp, baseline comparison, residual/variogram diagnostics, AOA/clipping diagnostics và không có hard failure.
 
-```text
-ACCEPT
-RERUN
-MANUAL_REVIEW
-REJECT
-```
+Nếu pure nugget fallback, ghi regression-only; không gọi đó là RK improvement.
 
-RERUN chỉ khi có cảnh báo có thể cải thiện bằng tham số hợp lệ. MANUAL_REVIEW khi variogram/bản đồ cần chuyên gia xem. REJECT khi R²_pred âm, RK kém baseline rõ, variogram không có cấu trúc hoặc dữ liệu quá ít.
+Với 22 điểm ngoài ROI, báo target population/support, covariate AOA/dissimilarity và sensitivity analysis. Không gọi chúng là validation set.
 
-## 9. Nếu cần RERUN
+## 7. Knowledge retrieval
 
-Tạo `agent/decisions/ai_decision_<TARGET>_iter_001.json` đúng schema. Chỉ dùng whitelist trong `AGENT_README.md`. Sau đó chạy validator:
+Kiểm tra knowledge:
 
-```powershell
-Rscript scripts\agent_validate_decision.R --decision agent\decisions\ai_decision_<TARGET>_iter_001.json --request agent\requests\run_request_<TARGET>_iter_001.json --output agent\decisions\validated_decision_<TARGET>_iter_001.json
-```
+    .\_UNG_DUNG\tools\run_rag_smoke_test.ps1
+    .\_UNG_DUNG\tools\run_rag_build_curated_index.ps1
 
-Nếu validator từ chối, dừng. Không bypass validator.
+Tra cứu:
 
-## 10. Stop conditions
+    .\_UNG_DUNG\tools\run_rag_query.ps1 -Query "điểm ngoài ROI và area of applicability" -TopK 8
 
-Mặc định `MAX_ITERATIONS = 3`. Dừng nếu ACCEPT, REJECT, MANUAL_REVIEW, đạt max iterations, validator từ chối, R²_pred vẫn âm, hoặc hai lần rerun liên tiếp không cải thiện RMSE khoảng 3-5%.
+Chỉ dùng claim có doc_id/DOI/URL và đúng phạm vi. Không suy citation.
 
-## 11. Compare runs
+## 8. Báo cáo cuối
 
-Nếu có từ 2 run trở lên:
+Nêu rõ:
 
-```powershell
-Rscript scripts\agent_compare_runs.R --results agent\responses --output agent\history\run_comparison_<TARGET>.json
-```
-
-Không dùng cú pháp `--target` hoặc `--history` nếu script hiện tại không hỗ trợ.
-
-## 12. RAG local nếu cần tra cứu tài liệu
-
-```powershell
-.\run_rag_inventory.ps1
-.\run_rag_build_local_index.ps1
-.\run_rag_query.ps1 -Query "spatial cross-validation variogram range" -TopK 8
-```
-
-Không tải, chia sẻ hoặc commit tài liệu bản quyền. Chỉ đọc tài liệu local người dùng cung cấp hợp pháp.
-
-## 13. Báo cáo cuối cho người dùng
-
-Trả lời bằng tiếng Việt có dấu, nêu rõ:
-
-```text
-Workflow đã chạy
-Target đã chạy
-Số iteration
-Metric từng iteration
-Variogram và neighbor được chọn
-Run được chọn và lý do
-Vì sao không chọn RMSE thấp nhất nếu có
-Output cụ thể nằm ở đâu
-Có cần manual review không
-Giới hạn còn lại
-```
-
-Nếu lỗi, báo lệnh đã chạy, lỗi nhận được, file/log liên quan, nguyên nhân có khả năng và cách khắc phục.
-## Ghi chú cập nhật về compare và loop
-
-- Khi so sánh nhiều run, không trỏ mù vào toàn bộ `agent/responses` nếu có nhiều lịch sử cũ. Hãy dùng `--target`, `--run_prefix`, `--source_contains` hoặc thư mục `agent/history/<loop_id>/results`.
-- `run_agent_loop.ps1` là wrapper ưu tiên khi muốn chạy nhiều iteration có kiểm soát. Nếu không có file AI decision và không bật `-AutoDecision`, loop sẽ dừng ở `WAITING_FOR_AI_DECISION` thay vì tự đoán bừa.
+- project và workflow đã chạy;
+- input đã dùng và target;
+- sample count, trong/ngoài ROI, Soil Type/Other;
+- FULL/REDUCED hoặc PC_ONLY/PC_PLUS_SOIL được chọn và lý do;
+- metric outer held-out và baseline;
+- variogram/prediction method;
+- AOA, clipping, uncertainty type;
+- output công khai;
+- cảnh báo, hard failure và việc người dùng còn phải làm;
+- không gọi bản đồ là khuyến cáo phân bón nếu chưa có hiệu chuẩn nông học.

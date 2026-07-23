@@ -1,0 +1,128 @@
+{
+  "schema_version": "curated_index_manifest_v1",
+  "generated_at_utc": "2026-07-20T08:37:18Z",
+  "purpose": "Auditable lexical retrieval over curated bibliographic metadata and evidence cards; no copyrighted full text.",
+  "exclusions": ["sources with quality_level=exclude", "evidence-card templates", "paper full text"],
+  "output": {
+    "chunks_file": "knowledge/index/curated/chunks.jsonl",
+    "sha256": "dd2f1156ac9931ecbbdd981d5fac2f8a9542e68a28768b885d98192275d8c46d",
+    "hash_available": true
+  },
+  "counts": {
+    "source_rows_total": 58,
+    "source_chunks_indexed": 58,
+    "source_rows_excluded": 0,
+    "evidence_cards_indexed": 25,
+    "total_chunks": 83
+  },
+  "inputs": [
+    {
+      "path": "knowledge/metadata/sources.csv",
+      "sha256": "26cc32d1ca74600f785b308dabd1f08ccd89539e8065b1f0b16253d0a47a6534"
+    },
+    {
+      "path": "knowledge/metadata/topic_taxonomy.json",
+      "sha256": "987dc1494bb588519ba85fbcdc6f41b50609f361ddd9f13214fe36bbbea09176"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/covariate_native_resolution_001.json",
+      "sha256": "90043864eebaad6b64a7469fb899f31917f9c7355a4ba7e8468f167b8cb1c732"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/covariate_temporal_provenance_001.json",
+      "sha256": "2b2a05130989668662a52e322420775baf45b20ed6899d616cf29189cb2edcd4"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/crop_map_candidate_review_accuracy_001.json",
+      "sha256": "a764e3081425367430f0ef0c2dec6571d3ae655bf08a99240d7f3d17ae5f7baf"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/cv_refit_leakage_001.json",
+      "sha256": "74d4f35df6012c3182e8de309ee71712942d52198c4cde32e069acbff9a1e2ed"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/dsm_covariates_validation_001.json",
+      "sha256": "8429eb2570f167c8adb4d15525a8f0f343a53973be661a162aceb516c20be337"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/full_reduced_tradeoff_001.json",
+      "sha256": "310d3ae4976fd3500680395b422cc295b20aefa8d04b9aa8283a66068d3e31dc"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/lab_method_unit_harmonization_001.json",
+      "sha256": "23c1c22ec111d5c99341c9ac7308ddf5be7384f1588d1b321d88fdd0e73c86d4"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/map_support_resolution_001.json",
+      "sha256": "3e1985616dc3f60221d0d9cddd5368aed7f934d910d0cfe6a07823b4733bf391"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/metrics_multi_metric_assessment_001.json",
+      "sha256": "9d919d1e7a30e573866e887177de8cd098b8e1611843468dead4135fad74e4f2"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/nugget_sill_weak_structure_001.json",
+      "sha256": "e55eae4a17187473ad466d8724946a140f7bac7048e071cc98b26cafea7baf67"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/nutrient_map_not_fertilizer_rate_001.json",
+      "sha256": "4c4f53bd9abdf9b7c91690dd25558216fcc541677145386d4570232ba103da6f"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/outside_roi_aoa_relocation_001.json",
+      "sha256": "5847178d75daf63d75e1d35e804091058c7252df3736b9ab2cb9dd59aa14fb1c"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/pca_full_rank_rotation_001.json",
+      "sha256": "2bbea9cdbaa68fc5943c847fb32e0299fcf4e453d62ccffb09d18e2718f59d69"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/probability_validation_vs_spatial_cv_001.json",
+      "sha256": "d8fe02e33ba8361170e7aa484ef4357e9b7dac9ce152863234dade41ff02ae20"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/residual_sd_not_total_uncertainty_001.json",
+      "sha256": "420c1bbef630c7876f5960d4b521385a2a706979ca6efde84ae08a061df11a66"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/rk_baseline_comparison_001.json",
+      "sha256": "5ca0f4b9437d92cbe23af914c5d9776764ce6942352b0b4c0c41be95b2feb77f"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/rk_residual_workflow_001.json",
+      "sha256": "584bda2000eb6b227b93c77cdd89d828bfba3d4f6da0be5be238ba5c61b9ade0"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/sentinel1_grd_db_no_double_log_001.json",
+      "sha256": "7d51d7a29dbb07d7702e63fe125d092a4e5993ede248dd5b7efb6bbab75c6b32"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/soil_nutrient_class_accuracy_001.json",
+      "sha256": "c1fefe72358ff2419b089e743dcc9ac23933383eb87e162560a960deac2d3ad7"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/soil_type_categorical_support_001.json",
+      "sha256": "03973cb73069a69aee11e971125afb4b4db9357c62bcff1aebb8ed0194f0e2d7"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/spatial_cv_random_bias_001.json",
+      "sha256": "f92eef604123097e154d83efb46af4ad92c8bb6d30f8aedb7ecb21f2b4ddf025"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/sugarcane_temporal_s1_s2_mapping_001.json",
+      "sha256": "211c3e5f5a67fb8cb844e9de906eb04263d42337922911a1e2a2c43e33bd7164"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/true_clhs_definition_001.json",
+      "sha256": "160396e2120a5abe33859d38218936ebdaadfd2a8e6fb24bcd03394c99ff6d5c"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/uncertainty_kriging_variance_limits_001.json",
+      "sha256": "6fb0f4ce1cdc5411b8ca0b0c323f7d5c5c71aecabbc99f9cc5237eae9b9a6ce9"
+    },
+    {
+      "path": "knowledge/notes/evidence_cards/variogram_range_cutoff_001.json",
+      "sha256": "8b4bf756b342a139a373b279427f05ff3f43bd03c493da8620e959bdee4e55c0"
+    }
+  ]
+}
